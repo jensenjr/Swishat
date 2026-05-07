@@ -1,0 +1,40 @@
+# Beroenden
+node_modules/
+
+# Byggoutput
+.next/
+out/
+dist/
+build/
+
+# Miljövariabler — ladda ALDRIG upp dessa
+.env
+.env.local
+.env.development
+.env.production
+.env*.local
+
+# Plattformsboilerplate (auto-genereras, behövs inte i Git)
+web/src/auth.js
+web/src/utils/useAuth.js
+web/src/utils/useUser.js
+web/src/utils/useUpload.js
+web/src/utils/useHandleStreamResponse.js
+web/src/app/api/auth/
+web/src/app/api/utils/upload.js
+
+# Mobil (används inte i detta projekt)
+mobile/
+
+# OS-filer
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Loggar
+*.log
+npm-debug.log*
