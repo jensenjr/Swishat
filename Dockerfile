@@ -4,6 +4,7 @@ WORKDIR /app
 COPY web/package*.json ./
 RUN npm ci --legacy-peer-deps
 COPY web/ ./
+COPY shared/ /shared/
 RUN npm run build && npm prune --omit=dev
 
 FROM node:20-slim
