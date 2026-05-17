@@ -2,7 +2,7 @@ FROM node:20-slim AS builder
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY web/package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY web/ ./
 RUN npm run build && npm prune --omit=dev
 
