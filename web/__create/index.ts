@@ -291,6 +291,8 @@ app.use('/api/auth/*', async (c, next) => {
   }
   return next();
 });
+app.get('/health', (c) => c.json({ status: 'ok' }));
+
 app.route(API_BASENAME, api);
 
 export default await createHonoServer({
