@@ -79,6 +79,7 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+    emptyOutDir: false,
   },
   clearScreen: false,
   server: {

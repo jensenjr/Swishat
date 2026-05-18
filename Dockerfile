@@ -1,13 +1,13 @@
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY web/package*.json ./
 RUN npm ci --legacy-peer-deps
 COPY web/ ./
 COPY shared/ /shared/
-RUN npm run build && node build-routes.mjs && npm prune --omit=dev
+RUN node build-routes.mjs && npm run build && npm prune --omit=dev
 
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/build ./build
