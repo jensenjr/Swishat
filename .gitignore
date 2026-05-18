@@ -1,32 +1,15 @@
-# Beroenden
+# Dependencies
 node_modules/
 
-# Byggoutput
-.next/
-out/
+# Build output
 dist/
-build/
 
-# Miljövariabler — ladda ALDRIG upp dessa
+# Environment variables
 .env
 .env.local
-.env.development
-.env.production
-.env*.local
+.env.*.local
 
-# Plattformsboilerplate (auto-genereras, behövs inte i Git)
-web/src/auth.js
-web/src/utils/useAuth.js
-web/src/utils/useUser.js
-web/src/utils/useUpload.js
-web/src/utils/useHandleStreamResponse.js
-web/src/app/api/auth/
-web/src/app/api/utils/upload.js
-
-# Mobil (används inte i detta projekt)
-mobile/
-
-# OS-filer
+# OS files
 .DS_Store
 Thumbs.db
 
@@ -35,6 +18,6 @@ Thumbs.db
 .idea/
 *.swp
 
-# Loggar
+# Logs
 *.log
 npm-debug.log*

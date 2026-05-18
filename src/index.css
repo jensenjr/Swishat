@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+.swish-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: white;
+  border: 1.5px solid #E8E0FF;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #1A1A2E;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.swish-input:focus {
+  border-color: #5B3FA8;
+  box-shadow: 0 0 0 3px rgba(91, 63, 168, 0.12);
+}
+.swish-input::placeholder {
+  color: #C4C4D4;
+}
+
+.swish-input-pub {
+  width: 100%;
+  padding: 11px 14px;
+  background: white;
+  border: 1.5px solid #E8E0FF;
+  border-radius: 10px;
+  font-size: 15px;
+  color: #1A1A2E;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.swish-input-pub:focus {
+  border-color: #5B3FA8;
+  box-shadow: 0 0 0 3px rgba(91, 63, 168, 0.12);
+}
+.swish-input-pub::placeholder {
+  color: #C4C4D4;
+}
