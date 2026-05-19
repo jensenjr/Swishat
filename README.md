@@ -4,6 +4,7 @@ En gratis, kontofrihetsbaserad webbtjänst för att samla in pengar via Swish. S
 
 > ⚠️ **Ej kopplat till Swish AB.** Betalningar sker direkt via användarnas egna Swish-appar. Denna tjänst hanterar inte pengar.
 
+---
 
 ## Funktioner
 
@@ -13,7 +14,6 @@ En gratis, kontofrihetsbaserad webbtjänst för att samla in pengar via Swish. S
 - **Adminpanel** med token-skyddad åtkomst — verifiera, ångra och ta bort bidrag
 - **Valfri PIN-återhämtning** — hitta tillbaka till din adminpanel med Swish-nummer + PIN
 - **Betalningsbevis via SMS** — om admin kräver det uppmanas betalaren ta en skärmdump och skicka via SMS med förfyllt meddelande och referenskod
-- **Dela-funktion** — native share-meny eller kopiering med förfylld text på svenska inkl. mål och rekommenderat belopp
 - **Smart auto-förfall** med aktivitetsbaserad förlängning (se nedan)
 - **Fullt på svenska** — hela gränssnittet och alla meddelanden
 
@@ -26,9 +26,7 @@ En gratis, kontofrihetsbaserad webbtjänst för att samla in pengar via Swish. S
 | Insamling skapad | Aktiv i **14 dagar** |
 | Ny betalning registreras när < 7 dagar kvar | Förlängs med **+7 dagar** |
 | Admin klickar "Förläng" | Förlängs med **+14 dagar** |
-| **30 dagar sedan skapande** | Raderas automatiskt — hård gräns, kan ej överskridas |
-
-> Insamlingen kan aldrig vara aktiv mer än **30 dagar totalt** oavsett aktivitet.
+| **30 dagar sedan skapande** | Hård gräns — kan ej överskridas |
 
 ---
 
@@ -36,41 +34,20 @@ En gratis, kontofrihetsbaserad webbtjänst för att samla in pengar via Swish. S
 
 | Del | Teknologi |
 |---|---|
-| Frontend | React 18, Tailwind CSS |
-| Backend | Node.js serverless API-routes |
-| Databas | PostgreSQL via Neon (`@neondatabase/serverless`) |
-| Datahämtning | `@tanstack/react-query` |
+| Frontend | React 18, Tailwind CSS, `@tanstack/react-query` |
+| Backend | Node.js + [Hono](https://hono.dev) |
+| Databas | PostgreSQL (`postgres` / standard TCP) |
 | Lösenordshashning | `argon2` |
-| Ikoner | `lucide-react` |
+| Build | Vite |
+| Deploy | [Coolify](https://coolify.io) via Nixpacks |
 
 ---
 
-## Installation
+## Driftsättning (Coolify)
 
-### Krav
+### 1. Databas
 
-- Node.js 18+
-- En PostgreSQL-databas (t.ex. [Neon](https://neon.tech))
-
-### Klona och installera
-
-```bash
-git clone https://github.com/ditt-repo/swish-insamling.git
-cd swish-insamling
-npm install
-```
-
-### Miljövariabler
-
-Skapa en `.env.local`-fil i projektroten:
-
-```env
-DATABASE_URL=postgresql://user:password@host/dbname
-```
-
-### Databasschema
-
-Kör följande SQL mot din PostgreSQL-databas:
+Skapa en PostgreSQL-databas i Coolify och kör följande schema (Terminal → `psql -U postgres`):
 
 ```sql
 CREATE TABLE collections (
@@ -80,35 +57,73 @@ CREATE TABLE collections (
   target_amount NUMERIC,
   swish_number TEXT NOT NULL,
   suggested_amount NUMERIC,
+  require_proof BOOLEAN DEFAULT false,
+  is_active BOOLEAN DEFAULT true,
   admin_token TEXT NOT NULL,
-  is_active BOOLEAN DEFAULT TRUE,
-  require_proof BOOLEAN DEFAULT FALSE,
   pin_hash TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  last_admin_activity_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  hard_cap_at TIMESTAMPTZ NOT NULL,
+  last_admin_activity_at TIMESTAMPTZ,
   last_contribution_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
-  hard_cap_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days')
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE contributions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+  collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  reference_code TEXT NOT NULL,
   amount NUMERIC,
-  status TEXT DEFAULT 'unverified' CHECK (status IN ('unverified', 'verified')),
+  reference_code TEXT NOT NULL,
+  status TEXT DEFAULT 'unverified',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
-### Starta lokalt
+### 2. Applikation
 
-```bash
-npm run dev
+- **Build Pack**: Nixpacks (auto-detekteras)
+- **Miljövariabler**:
+
+| Variabel | Värde |
+|---|---|
+| `DATABASE_URL` | Intern anslutningssträng från Coolify-databasen |
+| `NODE_ENV` | `production` |
+| `PORT` | `5000` (valfritt, standard) |
+
+### 3. Bygg & start
+
+Nixpacks kör automatiskt:
+```
+npm ci → npm run build (Vite) → node server/index.js
 ```
 
-Öppna [http://localhost:3000](http://localhost:3000).
+---
+
+## Lokal utveckling
+
+```bash
+git clone https://github.com/jensenjr/Swishat.git
+cd Swishat
+npm install
+```
+
+Skapa en `.env`-fil:
+
+```env
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+```
+
+Starta Vite (frontend) och servern i varsitt terminalfönster:
+
+```bash
+# Terminal 1 — frontend med HMR på :5173
+npm run dev
+
+# Terminal 2 — API-server på :5000
+node server/index.js
+```
+
+Vite proxar automatiskt `/api/*` till `localhost:5000`.
 
 ---
 
@@ -116,9 +131,9 @@ npm run dev
 
 | Sida | URL | Beskrivning |
 |---|---|---|
-| Startsida | `/` | Skapa ny insamling + återhämtning |
-| Publik insamlingssida | `/c/[id]` | Bidragsgivares vy |
-| Adminpanel | `/c/[id]/admin?token=...` | Admin-vy med full kontroll |
+| Startsida | `/` | Skapa ny insamling + återhämtning av admin-länk |
+| Publik insamlingssida | `/c/:id` | Bidragsgivarens vy med Swish-djuplänk |
+| Adminpanel | `/c/:id/admin?token=...` | Full kontroll — verifiera, ta bort, förläng |
 
 ---
 
@@ -126,33 +141,23 @@ npm run dev
 
 | Metod | Rutt | Beskrivning |
 |---|---|---|
+| `GET` | `/health` | Hälsokontroll |
 | `POST` | `/api/collections` | Skapa ny insamling |
 | `GET` | `/api/collections/:id` | Hämta insamling (+ bidrag om admin-token medföljer) |
 | `PATCH` | `/api/collections/:id` | Uppdatera status eller förläng giltighetstid |
 | `POST` | `/api/collections/recover` | Återhämta admin-länk via Swish-nummer + PIN |
 | `POST` | `/api/contributions` | Registrera nytt bidrag |
-| `PATCH` | `/api/contributions/:id` | Uppdatera bidragsstatus |
+| `PATCH` | `/api/contributions/:id` | Uppdatera bidragsstatus eller belopp |
 | `DELETE` | `/api/contributions/:id` | Ta bort bidrag |
 
 ---
 
 ## Säkerhet
 
-- Admin-tokens är UUID:n genererade server-side och exponeras aldrig i källkod
+- Admin-tokens är UUID:n genererade server-side
 - PIN-koder hashas med `argon2` och sparas aldrig i klartext
 - Varje admin-API-anrop validerar token innan åtgärd utförs
-- Inga användarkonton — minimal datainsamling per GDPR-principer
-
----
-
-## Planerad utveckling (v2)
-
-- [ ] Super-admin panel för support och användarhjälp
-- [ ] CSV-export av bidragslista från adminpanelen
-- [ ] E-postnotifikationer (via Resend)
-- [ ] Insamlingsmallar (t.ex. "Födelsedagspresent", "Kickback", "Klasskassa")
-- [ ] Automatisk databasrensning via schemalagda cron-jobb
-- [ ] Flerspråkigt stöd (engelska, norska, danska)
+- Inga användarkonton — minimal datainsamling
 
 ---
 
