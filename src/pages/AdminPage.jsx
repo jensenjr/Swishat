@@ -9,6 +9,8 @@ import {
   RotateCcw,
   Users,
   TrendingUp,
+  PlusCircle,
+  X,
 } from "lucide-react";
 
 function SwishLogo({ size = 32 }) {
@@ -94,6 +96,8 @@ export default function AdminCollectionPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [shareSuccess, setShareSuccess] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [showManual, setShowManual] = useState(false);
+  const [manualForm, setManualForm] = useState({ name: "", amount: "", status: "verified" });
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -195,6 +199,29 @@ export default function AdminCollectionPage() {
     },
     onSuccess: () =>
       queryClient.invalidateQueries(["collection-admin", id, token]),
+  });
+
+  const addManualPayment = useMutation({
+    mutationFn: async ({ name, amount, status }) => {
+      const res = await fetch("/api/contributions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          collection_id: id,
+          name,
+          amount: amount ? parseFloat(amount) : undefined,
+          status,
+          token,
+        }),
+      });
+      if (!res.ok) throw new Error("Misslyckades");
+      return res.json();
+    },
+    onSuccess: () => {
+      setManualForm({ name: "", amount: "", status: "verified" });
+      setShowManual(false);
+      queryClient.invalidateQueries(["collection-admin", id, token]);
+    },
   });
 
   const handleShare = async () => {
@@ -354,6 +381,84 @@ export default function AdminCollectionPage() {
             </button>
           </div>
         </div>
+
+        {/* Manual payment */}
+        {!showManual ? (
+          <button
+            onClick={() => setShowManual(true)}
+            className="flex items-center gap-2 text-sm font-bold text-[#5B3FA8] px-4 py-2.5 rounded-xl border border-[#E8E0FF] bg-white hover:bg-[#F8F6FF] transition-colors shadow-sm w-fit"
+          >
+            <PlusCircle size={15} /> Lägg till manuell betalning
+          </button>
+        ) : (
+          <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-[#1A1A2E]">Manuell betalning</h3>
+              <button onClick={() => setShowManual(false)} className="text-[#9B9BB5] hover:text-[#1A1A2E]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1.5 sm:col-span-1">
+                <label className="text-xs font-bold text-[#6B6B8D] uppercase tracking-wider">
+                  Namn <span className="text-[#FF8C3B]">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Förnamn Efternamn"
+                  className="swish-input"
+                  value={manualForm.name}
+                  onChange={(e) => setManualForm({ ...manualForm, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-[#6B6B8D] uppercase tracking-wider">Belopp (kr)</label>
+                <input
+                  type="number"
+                  placeholder="Valfritt"
+                  className="swish-input"
+                  value={manualForm.amount}
+                  onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-[#6B6B8D] uppercase tracking-wider">Status</label>
+                <div className="flex gap-2 pt-1">
+                  {["verified", "unverified"].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setManualForm({ ...manualForm, status: s })}
+                      className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${
+                        manualForm.status === s
+                          ? s === "verified"
+                            ? "bg-green-50 text-green-700 border-green-200"
+                            : "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-white text-[#9B9BB5] border-[#E8E0FF] hover:bg-[#F8F6FF]"
+                      }`}
+                    >
+                      {s === "verified" ? "Verifierad" : "Overifierad"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {addManualPayment.isError && (
+              <p className="text-sm text-red-500">Kunde inte lägga till betalningen.</p>
+            )}
+            <button
+              onClick={() => {
+                if (!manualForm.name.trim()) return;
+                addManualPayment.mutate(manualForm);
+              }}
+              disabled={addManualPayment.isPending || !manualForm.name.trim()}
+              className="px-5 py-2.5 rounded-xl font-bold text-white text-sm hover:opacity-90 transition-all disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg, #5B3FA8, #0099CC)" }}
+            >
+              {addManualPayment.isPending ? "Lägger till…" : "Lägg till betalning"}
+            </button>
+          </div>
+        )}
 
         {/* Table */}
         <div className="bg-white rounded-2xl border border-[#E8E0FF] overflow-hidden shadow-sm">

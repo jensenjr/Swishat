@@ -7,14 +7,14 @@ const app = new Hono();
 app.post('/contributions', async (c) => {
   try {
     const body = await c.req.json();
-    const { collection_id, name, amount } = body;
+    const { collection_id, name, amount, token, status: requestedStatus } = body;
 
     if (!collection_id || !name) {
       return c.json({ error: 'Insamlings-ID och namn krävs' }, 400);
     }
 
     const [collection] = await sql`
-      SELECT id, is_active, expires_at, hard_cap_at, suggested_amount
+      SELECT id, is_active, expires_at, hard_cap_at, suggested_amount, admin_token
       FROM collections
       WHERE id = ${collection_id}
     `;
@@ -22,11 +22,17 @@ app.post('/contributions', async (c) => {
     if (!collection) {
       return c.json({ error: 'Insamlingen hittades inte' }, 404);
     }
-    if (!collection.is_active) {
-      return c.json({ error: 'Insamlingen är stängd' }, 403);
-    }
-    if (new Date(collection.expires_at) < new Date()) {
-      return c.json({ error: 'Insamlingen har gått ut' }, 403);
+
+    // Admin bypass: valid token skips active/expiry checks and allows custom status
+    const isAdmin = token && collection.admin_token === token;
+
+    if (!isAdmin) {
+      if (!collection.is_active) {
+        return c.json({ error: 'Insamlingen är stängd' }, 403);
+      }
+      if (new Date(collection.expires_at) < new Date()) {
+        return c.json({ error: 'Insamlingen har gått ut' }, 403);
+      }
     }
 
     const generateRef = () => {
@@ -38,6 +44,8 @@ app.post('/contributions', async (c) => {
 
     const reference_code = generateRef();
 
+    const status = isAdmin && requestedStatus ? requestedStatus : 'unverified';
+
     const [contribution] = await sql`
       INSERT INTO contributions (collection_id, name, amount, reference_code, status)
       VALUES (
@@ -45,7 +53,7 @@ app.post('/contributions', async (c) => {
         ${name},
         ${amount || collection.suggested_amount || null},
         ${reference_code},
-        'unverified'
+        ${status}
       ) RETURNING *
     `;
 
