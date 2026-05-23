@@ -120,7 +120,7 @@ export default function CollectionPublicPage() {
           JSON.stringify({
             version: 1,
             payee: { value: collection.swish_number.replace(/\s/g, "") },
-            amount: { value: contribution.amount || 0 },
+            amount: { value: parseFloat(contribution.amount) || 0 },
             message: { value: contribution.reference_code, editable: false },
           }),
         )}`
