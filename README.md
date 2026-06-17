@@ -154,9 +154,14 @@ Vite proxar automatiskt `/api/*` till `localhost:5000`.
 
 ## Säkerhet
 
-- Admin-tokens är UUID:n genererade server-side
+- Admin-tokens genereras med en kryptografiskt säker slumpgenerator (`crypto.randomUUID`)
+- Admin-token skickas i `Authorization`-headern, inte i URL:en, och jämförs i konstant tid
 - PIN-koder hashas med `argon2` och sparas aldrig i klartext
-- Varje admin-API-anrop validerar token innan åtgärd utförs
+- PIN-återhämtning skyddas av hastighetsbegränsning + utelåsning efter upprepade misslyckanden
+- Hastighetsbegränsning på skapande och bidrag
+- Server-side validering av belopp och textlängder
+- Säkerhetsheaders (CSP, `frame-ancestors 'none'`, `no-referrer`) och gräns på förfrågans storlek
+- Parametriserade SQL-frågor genomgående (ingen SQL-injektion)
 - Inga användarkonton — minimal datainsamling
 
 ---

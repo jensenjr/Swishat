@@ -107,6 +107,16 @@ export default function AdminCollectionPage() {
     setToken(params.get("token") || "");
   }, []);
 
+  // Send the admin token in the Authorization header rather than the request
+  // URL, so it never appears in server/proxy access logs. The token still
+  // lives in the page URL (so the admin link can be bookmarked), but no API
+  // request carries it as a query param.
+  const api = (path, options = {}) =>
+    fetch(path, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+    });
+
   const {
     data: collection,
     isLoading,
@@ -114,7 +124,7 @@ export default function AdminCollectionPage() {
   } = useQuery({
     queryKey: ["collection-admin", id, token],
     queryFn: async () => {
-      const res = await fetch(`/api/collections/${id}?token=${token}`);
+      const res = await api(`/api/collections/${id}`);
       if (!res.ok) throw new Error("Obehörig");
       return res.json();
     },
@@ -124,14 +134,11 @@ export default function AdminCollectionPage() {
 
   const updateContribution = useMutation({
     mutationFn: async ({ contributionId, status }) => {
-      const res = await fetch(
-        `/api/contributions/${contributionId}?token=${token}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        },
-      );
+      const res = await api(`/api/contributions/${contributionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
       if (!res.ok) throw new Error("Misslyckades");
       return res.json();
     },
@@ -141,10 +148,9 @@ export default function AdminCollectionPage() {
 
   const deleteContribution = useMutation({
     mutationFn: async (contributionId) => {
-      const res = await fetch(
-        `/api/contributions/${contributionId}?token=${token}`,
-        { method: "DELETE" },
-      );
+      const res = await api(`/api/contributions/${contributionId}`, {
+        method: "DELETE",
+      });
       if (!res.ok) throw new Error("Misslyckades");
       return res.json();
     },
@@ -156,7 +162,7 @@ export default function AdminCollectionPage() {
 
   const toggleActive = useMutation({
     mutationFn: async (is_active) => {
-      const res = await fetch(`/api/collections/${id}?token=${token}`, {
+      const res = await api(`/api/collections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active }),
@@ -170,7 +176,7 @@ export default function AdminCollectionPage() {
 
   const extendCollection = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/collections/${id}?token=${token}`, {
+      const res = await api(`/api/collections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ extend: true }),
@@ -189,7 +195,7 @@ export default function AdminCollectionPage() {
       );
       await Promise.all(
         unverified.map((c) =>
-          fetch(`/api/contributions/${c.id}?token=${token}`, {
+          api(`/api/contributions/${c.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "verified" }),
@@ -203,7 +209,7 @@ export default function AdminCollectionPage() {
 
   const addManualPayment = useMutation({
     mutationFn: async ({ name, amount, status }) => {
-      const res = await fetch("/api/contributions", {
+      const res = await api("/api/contributions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -211,7 +217,6 @@ export default function AdminCollectionPage() {
           name,
           amount: amount ? parseFloat(amount) : undefined,
           status,
-          token,
         }),
       });
       if (!res.ok) throw new Error("Misslyckades");
