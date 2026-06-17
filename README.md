@@ -79,6 +79,9 @@ CREATE TABLE contributions (
 );
 ```
 
+> ℹ️ Tabellen `audit_log` (revisionslogg över adminåtgärder) skapas automatiskt vid
+> serverstart (`CREATE TABLE IF NOT EXISTS`) — du behöver inte köra den manuellt.
+
 ### 2. Applikation
 
 - **Build Pack**: Nixpacks (auto-detekteras)

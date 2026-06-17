@@ -6,6 +6,8 @@
 // shared store such as Redis — only this file needs to change; the middleware
 // and AttemptLimiter signatures stay the same.
 
+import { getClientIp } from '../lib/clientIp.js';
+
 const WINDOW_STORE = new Map(); // `${path}:${id}` -> { count, resetAt }
 
 // Periodically drop expired windows so the map can't grow unbounded.
@@ -16,14 +18,6 @@ const windowSweep = setInterval(() => {
   }
 }, 60_000);
 windowSweep.unref?.();
-
-// Client IP, trusting the reverse proxy (Coolify/Traefik) that terminates TLS
-// and sets these headers. Only safe because the app is not exposed directly.
-function getClientIp(c) {
-  const xff = c.req.header('x-forwarded-for');
-  if (xff) return xff.split(',')[0].trim();
-  return c.req.header('x-real-ip')?.trim() || 'unknown';
-}
 
 // Fixed-window rate limiter middleware.
 export function rateLimit({

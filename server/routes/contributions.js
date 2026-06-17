@@ -3,6 +3,8 @@ import { randomInt } from 'node:crypto';
 import sql from '../db.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getAdminToken, tokensMatch } from '../lib/auth.js';
+import { getClientIp } from '../lib/clientIp.js';
+import { recordAudit } from '../lib/audit.js';
 import {
   ValidationError,
   requireText,
@@ -82,6 +84,18 @@ app.post('/contributions', contributionRateLimit, async (c) => {
       ) RETURNING *
     `;
 
+    // Audit only admin-created (manual) entries; public contributions are
+    // already self-recorded as their own row.
+    if (isAdmin) {
+      await recordAudit({
+        collectionId: collection_id,
+        contributionId: contribution.id,
+        action: 'contribution.create_manual',
+        detail: { name: contribution.name, amount: contribution.amount, status },
+        ip: getClientIp(c),
+      });
+    }
+
     // Auto-extend if less than 7 days remain
     const now = new Date();
     const expiresAt = new Date(collection.expires_at);
@@ -159,6 +173,17 @@ app.patch('/contributions/:id', async (c) => {
       UPDATE collections SET last_admin_activity_at = NOW() WHERE id = ${collectionId}
     `;
 
+    const detail = {};
+    if (status !== undefined) detail.status = status;
+    if (amount !== undefined) detail.amount = amount;
+    await recordAudit({
+      collectionId,
+      contributionId: id,
+      action: 'contribution.update',
+      detail,
+      ip: getClientIp(c),
+    });
+
     return c.json(updated);
   } catch (error) {
     if (error instanceof ValidationError) {
@@ -180,10 +205,23 @@ app.delete('/contributions/:id', async (c) => {
       return c.json({ error: 'Obehörig' }, 401);
     }
 
+    // Capture the row before deleting so the audit entry retains what was removed.
+    const [removed] = await sql`
+      SELECT name, amount, reference_code, status FROM contributions WHERE id = ${id}
+    `;
+
     await sql`DELETE FROM contributions WHERE id = ${id}`;
     await sql`
       UPDATE collections SET last_admin_activity_at = NOW() WHERE id = ${collectionId}
     `;
+
+    await recordAudit({
+      collectionId,
+      contributionId: id,
+      action: 'contribution.delete',
+      detail: removed || null,
+      ip: getClientIp(c),
+    });
 
     return c.json({ success: true });
   } catch (error) {

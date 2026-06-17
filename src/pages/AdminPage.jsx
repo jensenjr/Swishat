@@ -11,7 +11,29 @@ import {
   TrendingUp,
   PlusCircle,
   X,
+  History,
 } from "lucide-react";
+
+const AUDIT_LABELS = {
+  "contribution.create_manual": "Manuell betalning tillagd",
+  "contribution.update": "Bidrag uppdaterat",
+  "contribution.delete": "Bidrag borttaget",
+  "collection.extend": "Insamling förlängd",
+  "collection.close": "Insamling stängd",
+  "collection.reopen": "Insamling återöppnad",
+};
+
+function describeAudit(entry) {
+  const label = AUDIT_LABELS[entry.action] || entry.action;
+  const d = entry.detail || {};
+  const bits = [];
+  if (d.name) bits.push(d.name);
+  if (d.status) bits.push(d.status === "verified" ? "verifierad" : "overifierad");
+  if (d.amount != null && d.amount !== "")
+    bits.push(`${Number(d.amount).toLocaleString("sv-SE")} kr`);
+  if (d.reference_code) bits.push(d.reference_code);
+  return { label, extra: bits.join(" · ") };
+}
 
 function SwishLogo({ size = 32 }) {
   return (
@@ -97,6 +119,7 @@ export default function AdminCollectionPage() {
   const [shareSuccess, setShareSuccess] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [showManual, setShowManual] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
   const [manualForm, setManualForm] = useState({ name: "", amount: "", status: "verified" });
   const queryClient = useQueryClient();
 
@@ -649,6 +672,51 @@ export default function AdminCollectionPage() {
             </table>
           </div>
         </div>
+
+        {/* Activity log */}
+        {collection.audit && collection.audit.length > 0 && (
+          <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowAudit(!showAudit)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-[#F8F6FF] transition-colors"
+            >
+              <span className="flex items-center gap-2 text-sm font-bold text-[#1A1A2E]">
+                <History size={15} className="text-[#5B3FA8]" /> Aktivitetslogg
+              </span>
+              <span className="text-xs text-[#9B9BB5]">
+                {collection.audit.length} händelser {showAudit ? "▲" : "▼"}
+              </span>
+            </button>
+            {showAudit && (
+              <ul className="divide-y divide-[#F0EBFF] border-t border-[#E8E0FF]">
+                {collection.audit.map((e, i) => {
+                  const { label, extra } = describeAudit(e);
+                  return (
+                    <li
+                      key={i}
+                      className="px-5 py-3 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#1A1A2E]">
+                          {label}
+                        </p>
+                        {extra && (
+                          <p className="text-xs text-[#9B9BB5] truncate">{extra}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-[#C4C4D4] shrink-0">
+                        {new Date(e.created_at).toLocaleString("sv-SE", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* Footer share */}
         <div className="bg-white rounded-2xl border border-[#E8E0FF] p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">

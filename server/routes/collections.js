@@ -4,6 +4,8 @@ import sql from '../db.js';
 import argon2 from 'argon2';
 import { rateLimit, AttemptLimiter } from '../middleware/rateLimit.js';
 import { getAdminToken, tokensMatch } from '../lib/auth.js';
+import { getClientIp } from '../lib/clientIp.js';
+import { recordAudit, getAuditLog } from '../lib/audit.js';
 import {
   ValidationError,
   requireText,
@@ -198,6 +200,7 @@ app.get('/collections/:id', async (c) => {
         ORDER BY created_at DESC
       `;
       result.contributions = contributions;
+      result.audit = await getAuditLog(id);
       result.isAdmin = true;
     }
 
@@ -237,6 +240,12 @@ app.patch('/collections/:id', async (c) => {
         WHERE id = ${id}
         RETURNING ${PUBLIC_COLLECTION_COLUMNS}
       `;
+      await recordAudit({
+        collectionId: id,
+        action: 'collection.extend',
+        detail: { expires_at: finalExpiry.toISOString() },
+        ip: getClientIp(c),
+      });
       return c.json(updated);
     }
 
@@ -247,6 +256,11 @@ app.patch('/collections/:id', async (c) => {
         WHERE id = ${id}
         RETURNING ${PUBLIC_COLLECTION_COLUMNS}
       `;
+      await recordAudit({
+        collectionId: id,
+        action: is_active === true ? 'collection.reopen' : 'collection.close',
+        ip: getClientIp(c),
+      });
       return c.json(updated);
     }
 

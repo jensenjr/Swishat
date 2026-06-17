@@ -8,8 +8,13 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import collectionsRouter from './routes/collections.js';
 import contributionsRouter from './routes/contributions.js';
+import { ensureAuditSchema } from './lib/audit.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Idempotent: creates the audit_log table if missing. Non-fatal — if it fails
+// the app still serves and audit logging degrades to a no-op.
+await ensureAuditSchema();
 
 const app = new Hono();
 
