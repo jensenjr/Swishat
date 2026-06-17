@@ -79,8 +79,9 @@ CREATE TABLE contributions (
 );
 ```
 
-> ℹ️ Tabellen `audit_log` (revisionslogg över adminåtgärder) skapas automatiskt vid
-> serverstart (`CREATE TABLE IF NOT EXISTS`) — du behöver inte köra den manuellt.
+> ℹ️ Tabellerna `audit_log` (revisionslogg över adminåtgärder) och `sms_codes`
+> (engångskoder för SMS-återställning) skapas automatiskt vid serverstart
+> (`CREATE TABLE IF NOT EXISTS`) — du behöver inte köra dem manuellt.
 
 ### 2. Applikation
 
@@ -92,6 +93,12 @@ CREATE TABLE contributions (
 | `DATABASE_URL` | Intern anslutningssträng från Coolify-databasen |
 | `NODE_ENV` | `production` |
 | `PORT` | `5000` (valfritt, standard) |
+| `ELKS_API_USERNAME` | 46elks API-användarnamn (valfritt – för SMS) |
+| `ELKS_API_PASSWORD` | 46elks API-lösenord (valfritt – för SMS) |
+| `ELKS_FROM` | Avsändare: namn (max 11 tecken) eller 46elks-nummer (valfritt) |
+
+> 🔐 SMS-uppgifterna anges **endast** i Coolifys miljövariabler — aldrig i koden eller `.env.example`.
+> Lämna dem tomma för att stänga av SMS-funktioner.
 
 ### 3. Bygg & start
 
@@ -149,6 +156,8 @@ Vite proxar automatiskt `/api/*` till `localhost:5000`.
 | `GET` | `/api/collections/:id` | Hämta insamling (+ bidrag om admin-token medföljer) |
 | `PATCH` | `/api/collections/:id` | Uppdatera status eller förläng giltighetstid |
 | `POST` | `/api/collections/recover` | Återhämta admin-länk via Swish-nummer + PIN |
+| `POST` | `/api/collections/recover/sms/request` | Skicka engångskod via SMS (46elks) |
+| `POST` | `/api/collections/recover/sms/verify` | Verifiera SMS-kod → admin-länk(ar) |
 | `POST` | `/api/contributions` | Registrera nytt bidrag |
 | `PATCH` | `/api/contributions/:id` | Uppdatera bidragsstatus eller belopp |
 | `DELETE` | `/api/contributions/:id` | Ta bort bidrag |
@@ -161,6 +170,7 @@ Vite proxar automatiskt `/api/*` till `localhost:5000`.
 - Admin-token skickas i `Authorization`-headern, inte i URL:en, och jämförs i konstant tid
 - PIN-koder hashas med `argon2` och sparas aldrig i klartext
 - PIN-återhämtning skyddas av hastighetsbegränsning + utelåsning efter upprepade misslyckanden
+- SMS-återhämtning: engångskoder hashas och lagras med utgångstid + försöksgräns; begränsad sändningstakt
 - Hastighetsbegränsning på skapande och bidrag
 - Server-side validering av belopp och textlängder
 - Säkerhetsheaders (CSP, `frame-ancestors 'none'`, `no-referrer`) och gräns på förfrågans storlek

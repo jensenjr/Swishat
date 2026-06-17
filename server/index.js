@@ -9,12 +9,15 @@ import { fileURLToPath } from 'node:url';
 import collectionsRouter from './routes/collections.js';
 import contributionsRouter from './routes/contributions.js';
 import { ensureAuditSchema } from './lib/audit.js';
+import { ensureSmsSchema } from './lib/smsCodes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Idempotent: creates the audit_log table if missing. Non-fatal — if it fails
-// the app still serves and audit logging degrades to a no-op.
+// Idempotent schema bootstrap (CREATE TABLE IF NOT EXISTS). Non-fatal — if it
+// fails the app still serves; audit logging degrades to a no-op and SMS
+// recovery returns an error until the table is available.
 await ensureAuditSchema();
+await ensureSmsSchema();
 
 const app = new Hono();
 

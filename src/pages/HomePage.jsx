@@ -9,6 +9,7 @@ import {
   EyeOff,
   ArrowRight,
   Search,
+  MessageSquare,
 } from "lucide-react";
 
 function SwishLogo({ size = 36 }) {
@@ -77,6 +78,11 @@ export default function HomePage() {
     pin: "",
   });
   const [recoveryError, setRecoveryError] = useState("");
+  const [recoveryMethod, setRecoveryMethod] = useState("pin");
+  const [smsStep, setSmsStep] = useState(1);
+  const [smsData, setSmsData] = useState({ swish_number: "", code: "" });
+  const [smsError, setSmsError] = useState("");
+  const [smsResults, setSmsResults] = useState(null);
   const [created, setCreated] = useState(null);
   const [shareSuccess, setShareSuccess] = useState(false);
 
@@ -110,6 +116,50 @@ export default function HomePage() {
       window.location.href = `/c/${data.id}/admin?token=${data.admin_token}`;
     },
     onError: (err) => setRecoveryError(err.message),
+  });
+
+  const requestSmsCode = useMutation({
+    mutationFn: async (swish_number) => {
+      const res = await fetch("/api/collections/recover/sms/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ swish_number }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Kunde inte skicka kod");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setSmsError("");
+      setSmsStep(2);
+    },
+    onError: (err) => setSmsError(err.message),
+  });
+
+  const verifySmsCode = useMutation({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/collections/recover/sms/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Verifiering misslyckades");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const cols = data.collections || [];
+      if (cols.length === 1) {
+        window.location.href = `/c/${cols[0].id}/admin?token=${cols[0].admin_token}`;
+      } else {
+        setSmsResults(cols);
+      }
+    },
+    onError: (err) => setSmsError(err.message),
   });
 
   const handleSubmit = (e) => {
@@ -480,56 +530,212 @@ export default function HomePage() {
 
           {showRecovery && (
             <div className="mt-3 bg-white rounded-2xl border border-[#E8E0FF] shadow-sm p-5 space-y-4">
-              <p className="text-sm text-[#6B6B8D]">
-                Ange ditt Swish-nummer och PIN-koden du valde vid skapandet.
-              </p>
-              <Field label="Ditt Swish-nummer">
-                <input
-                  type="tel"
-                  placeholder="070 000 00 00"
-                  className="swish-input"
-                  value={recoveryData.swish_number}
-                  onChange={(e) =>
-                    setRecoveryData({
-                      ...recoveryData,
-                      swish_number: e.target.value,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="PIN-kod">
-                <input
-                  type="password"
-                  placeholder="4–6 siffror"
-                  className="swish-input"
-                  value={recoveryData.pin}
-                  onChange={(e) =>
-                    setRecoveryData({ ...recoveryData, pin: e.target.value })
-                  }
-                />
-              </Field>
-              {recoveryError && (
-                <p className="text-sm text-red-500">{recoveryError}</p>
+              <div className="flex gap-2">
+                {[
+                  { key: "pin", label: "Med PIN" },
+                  { key: "sms", label: "Med SMS" },
+                ].map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => {
+                      setRecoveryMethod(m.key);
+                      setRecoveryError("");
+                      setSmsError("");
+                    }}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${
+                      recoveryMethod === m.key
+                        ? "bg-[#F0EBFF] text-[#5B3FA8] border-[#D9CCFF]"
+                        : "bg-white text-[#9B9BB5] border-[#E8E0FF] hover:bg-[#F8F6FF]"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {recoveryMethod === "pin" && (
+                <>
+                  <p className="text-sm text-[#6B6B8D]">
+                    Ange ditt Swish-nummer och PIN-koden du valde vid skapandet.
+                  </p>
+                  <Field label="Ditt Swish-nummer">
+                    <input
+                      type="tel"
+                      placeholder="070 000 00 00"
+                      className="swish-input"
+                      value={recoveryData.swish_number}
+                      onChange={(e) =>
+                        setRecoveryData({
+                          ...recoveryData,
+                          swish_number: e.target.value,
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="PIN-kod">
+                    <input
+                      type="password"
+                      placeholder="4–6 siffror"
+                      className="swish-input"
+                      value={recoveryData.pin}
+                      onChange={(e) =>
+                        setRecoveryData({ ...recoveryData, pin: e.target.value })
+                      }
+                    />
+                  </Field>
+                  {recoveryError && (
+                    <p className="text-sm text-red-500">{recoveryError}</p>
+                  )}
+                  <button
+                    onClick={() => {
+                      setRecoveryError("");
+                      recoverCollection.mutate(recoveryData);
+                    }}
+                    disabled={
+                      recoverCollection.isPending ||
+                      !recoveryData.swish_number ||
+                      !recoveryData.pin
+                    }
+                    className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-50 hover:opacity-90 transition-all"
+                    style={{
+                      background: "linear-gradient(135deg, #5B3FA8, #0099CC)",
+                    }}
+                  >
+                    {recoverCollection.isPending
+                      ? "Söker..."
+                      : "Hitta min insamling →"}
+                  </button>
+                </>
               )}
-              <button
-                onClick={() => {
-                  setRecoveryError("");
-                  recoverCollection.mutate(recoveryData);
-                }}
-                disabled={
-                  recoverCollection.isPending ||
-                  !recoveryData.swish_number ||
-                  !recoveryData.pin
-                }
-                className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-50 hover:opacity-90 transition-all"
-                style={{
-                  background: "linear-gradient(135deg, #5B3FA8, #0099CC)",
-                }}
-              >
-                {recoverCollection.isPending
-                  ? "Söker..."
-                  : "Hitta min insamling →"}
-              </button>
+
+              {recoveryMethod === "sms" && (
+                <>
+                  {smsResults ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-bold text-[#1A1A2E]">
+                        Dina insamlingar
+                      </p>
+                      {smsResults.length === 0 ? (
+                        <p className="text-sm text-[#9B9BB5]">
+                          Inga aktiva insamlingar hittades på detta nummer.
+                        </p>
+                      ) : (
+                        smsResults.map((col) => (
+                          <a
+                            key={col.id}
+                            href={`/c/${col.id}/admin?token=${col.admin_token}`}
+                            className="flex items-center justify-between gap-3 p-3 rounded-xl border border-[#E8E0FF] hover:bg-[#F8F6FF] transition-colors"
+                          >
+                            <span className="text-sm font-semibold text-[#1A1A2E] truncate">
+                              {col.title}
+                            </span>
+                            <ArrowRight
+                              size={15}
+                              className="text-[#5B3FA8] shrink-0"
+                            />
+                          </a>
+                        ))
+                      )}
+                    </div>
+                  ) : smsStep === 1 ? (
+                    <>
+                      <p className="text-sm text-[#6B6B8D]">
+                        Vi skickar en engångskod via SMS till ditt Swish-nummer.
+                      </p>
+                      <Field label="Ditt Swish-nummer">
+                        <input
+                          type="tel"
+                          placeholder="070 000 00 00"
+                          className="swish-input"
+                          value={smsData.swish_number}
+                          onChange={(e) =>
+                            setSmsData({
+                              ...smsData,
+                              swish_number: e.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      {smsError && (
+                        <p className="text-sm text-red-500">{smsError}</p>
+                      )}
+                      <button
+                        onClick={() => {
+                          setSmsError("");
+                          requestSmsCode.mutate(smsData.swish_number);
+                        }}
+                        disabled={
+                          requestSmsCode.isPending || !smsData.swish_number
+                        }
+                        className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-50 hover:opacity-90 transition-all flex items-center justify-center gap-2"
+                        style={{
+                          background:
+                            "linear-gradient(135deg, #5B3FA8, #0099CC)",
+                        }}
+                      >
+                        <MessageSquare size={15} />
+                        {requestSmsCode.isPending ? "Skickar..." : "Skicka kod"}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-[#6B6B8D]">
+                        Ange den 6-siffriga koden vi skickade till{" "}
+                        {smsData.swish_number}.
+                      </p>
+                      <Field label="Kod">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          placeholder="000000"
+                          className="swish-input tracking-widest"
+                          value={smsData.code}
+                          onChange={(e) =>
+                            setSmsData({
+                              ...smsData,
+                              code: e.target.value.replace(/\D/g, ""),
+                            })
+                          }
+                        />
+                      </Field>
+                      {smsError && (
+                        <p className="text-sm text-red-500">{smsError}</p>
+                      )}
+                      <button
+                        onClick={() => {
+                          setSmsError("");
+                          verifySmsCode.mutate(smsData);
+                        }}
+                        disabled={
+                          verifySmsCode.isPending || smsData.code.length < 6
+                        }
+                        className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-50 hover:opacity-90 transition-all"
+                        style={{
+                          background:
+                            "linear-gradient(135deg, #5B3FA8, #0099CC)",
+                        }}
+                      >
+                        {verifySmsCode.isPending
+                          ? "Verifierar..."
+                          : "Verifiera kod →"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSmsStep(1);
+                          setSmsData({ ...smsData, code: "" });
+                          setSmsError("");
+                        }}
+                        className="w-full text-xs font-semibold text-[#9B9BB5] hover:text-[#5B3FA8]"
+                      >
+                        Använd ett annat nummer
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>

@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomInt } from 'node:crypto';
 import sql from '../db.js';
 import argon2 from 'argon2';
 import { rateLimit, AttemptLimiter } from '../middleware/rateLimit.js';
 import { getAdminToken, tokensMatch } from '../lib/auth.js';
 import { getClientIp } from '../lib/clientIp.js';
 import { recordAudit, getAuditLog } from '../lib/audit.js';
+import { smsConfigured, sendSms, toE164Swedish } from '../lib/sms.js';
+import { canSend, storeCode, verifyCode } from '../lib/smsCodes.js';
 import {
   ValidationError,
   requireText,
@@ -35,6 +37,9 @@ const recoveryLockout = new AttemptLimiter({
 // IP-based limiters. Recovery and creation are the abuse-prone endpoints.
 const recoverRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 const createRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
+// SMS request is tightly limited — each call can send a (paid) SMS.
+const smsRequestRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
+const smsVerifyRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 
 // POST /api/collections/recover — must be before /:id
 app.post('/collections/recover', recoverRateLimit, async (c) => {
@@ -82,6 +87,88 @@ app.post('/collections/recover', recoverRateLimit, async (c) => {
   } catch (error) {
     console.error('Error recovering collection:', error);
     return c.json({ error: 'Återställning misslyckades' }, 500);
+  }
+});
+
+// POST /api/collections/recover/sms/request — send a one-time code by SMS.
+// Proves control of the Swish phone number, so it recovers any collection on
+// that number (even those created without a PIN). Must be before /:id.
+app.post('/collections/recover/sms/request', smsRequestRateLimit, async (c) => {
+  try {
+    const { swish_number } = await c.req.json();
+    if (!swish_number) {
+      return c.json({ error: 'Swish-nummer krävs' }, 400);
+    }
+    if (!smsConfigured()) {
+      return c.json({ error: 'SMS-återställning är inte aktiverad' }, 503);
+    }
+
+    const number = String(swish_number).trim();
+    // Same response regardless of outcome so the endpoint can't be used to
+    // enumerate numbers or probe whether a collection exists.
+    const generic = { ok: true, message: 'Om numret finns har en kod skickats via SMS.' };
+
+    if (!(await canSend(number))) return c.json(generic);
+
+    const [collection] = await sql`
+      SELECT id FROM collections
+      WHERE swish_number = ${number} AND expires_at > NOW()
+      LIMIT 1
+    `;
+    if (collection) {
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      try {
+        await sendSms(
+          toE164Swedish(number),
+          `Swishat återställningskod: ${code}. Gäller i 10 minuter. Dela aldrig koden med någon.`,
+        );
+        // Only persist once the SMS was accepted by the provider.
+        await storeCode(number, code);
+      } catch (err) {
+        console.error('SMS send failed:', err.message);
+      }
+    }
+
+    return c.json(generic);
+  } catch (error) {
+    console.error('SMS recovery request error:', error);
+    return c.json({ error: 'Kunde inte skicka kod' }, 500);
+  }
+});
+
+// POST /api/collections/recover/sms/verify — exchange a valid code for the
+// admin link(s) of every active collection on that number. Must be before /:id.
+app.post('/collections/recover/sms/verify', smsVerifyRateLimit, async (c) => {
+  try {
+    const { swish_number, code } = await c.req.json();
+    if (!swish_number || !code) {
+      return c.json({ error: 'Swish-nummer och kod krävs' }, 400);
+    }
+
+    const number = String(swish_number).trim();
+    if (recoveryLockout.isLocked(number)) {
+      return c.json(
+        { error: 'För många misslyckade försök. Försök igen om en stund.' },
+        429,
+      );
+    }
+
+    const valid = await verifyCode(number, String(code).trim());
+    if (!valid) {
+      recoveryLockout.recordFailure(number);
+      return c.json({ error: 'Felaktig eller utgången kod' }, 401);
+    }
+
+    recoveryLockout.clear(number);
+    const collections = await sql`
+      SELECT id, title, admin_token FROM collections
+      WHERE swish_number = ${number} AND expires_at > NOW()
+      ORDER BY created_at DESC
+    `;
+    return c.json({ collections });
+  } catch (error) {
+    console.error('SMS recovery verify error:', error);
+    return c.json({ error: 'Verifiering misslyckades' }, 500);
   }
 });
 
