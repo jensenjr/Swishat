@@ -11,7 +11,29 @@ import {
   TrendingUp,
   PlusCircle,
   X,
+  History,
 } from "lucide-react";
+
+const AUDIT_LABELS = {
+  "contribution.create_manual": "Manuell betalning tillagd",
+  "contribution.update": "Bidrag uppdaterat",
+  "contribution.delete": "Bidrag borttaget",
+  "collection.extend": "Insamling förlängd",
+  "collection.close": "Insamling stängd",
+  "collection.reopen": "Insamling återöppnad",
+};
+
+function describeAudit(entry) {
+  const label = AUDIT_LABELS[entry.action] || entry.action;
+  const d = entry.detail || {};
+  const bits = [];
+  if (d.name) bits.push(d.name);
+  if (d.status) bits.push(d.status === "verified" ? "verifierad" : "overifierad");
+  if (d.amount != null && d.amount !== "")
+    bits.push(`${Number(d.amount).toLocaleString("sv-SE")} kr`);
+  if (d.reference_code) bits.push(d.reference_code);
+  return { label, extra: bits.join(" · ") };
+}
 
 function SwishLogo({ size = 32 }) {
   return (
@@ -97,6 +119,7 @@ export default function AdminCollectionPage() {
   const [shareSuccess, setShareSuccess] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [showManual, setShowManual] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
   const [manualForm, setManualForm] = useState({ name: "", amount: "", status: "verified" });
   const queryClient = useQueryClient();
 
@@ -107,6 +130,16 @@ export default function AdminCollectionPage() {
     setToken(params.get("token") || "");
   }, []);
 
+  // Send the admin token in the Authorization header rather than the request
+  // URL, so it never appears in server/proxy access logs. The token still
+  // lives in the page URL (so the admin link can be bookmarked), but no API
+  // request carries it as a query param.
+  const api = (path, options = {}) =>
+    fetch(path, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+    });
+
   const {
     data: collection,
     isLoading,
@@ -114,7 +147,7 @@ export default function AdminCollectionPage() {
   } = useQuery({
     queryKey: ["collection-admin", id, token],
     queryFn: async () => {
-      const res = await fetch(`/api/collections/${id}?token=${token}`);
+      const res = await api(`/api/collections/${id}`);
       if (!res.ok) throw new Error("Obehörig");
       return res.json();
     },
@@ -124,14 +157,11 @@ export default function AdminCollectionPage() {
 
   const updateContribution = useMutation({
     mutationFn: async ({ contributionId, status }) => {
-      const res = await fetch(
-        `/api/contributions/${contributionId}?token=${token}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        },
-      );
+      const res = await api(`/api/contributions/${contributionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
       if (!res.ok) throw new Error("Misslyckades");
       return res.json();
     },
@@ -141,10 +171,9 @@ export default function AdminCollectionPage() {
 
   const deleteContribution = useMutation({
     mutationFn: async (contributionId) => {
-      const res = await fetch(
-        `/api/contributions/${contributionId}?token=${token}`,
-        { method: "DELETE" },
-      );
+      const res = await api(`/api/contributions/${contributionId}`, {
+        method: "DELETE",
+      });
       if (!res.ok) throw new Error("Misslyckades");
       return res.json();
     },
@@ -156,7 +185,7 @@ export default function AdminCollectionPage() {
 
   const toggleActive = useMutation({
     mutationFn: async (is_active) => {
-      const res = await fetch(`/api/collections/${id}?token=${token}`, {
+      const res = await api(`/api/collections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active }),
@@ -170,7 +199,7 @@ export default function AdminCollectionPage() {
 
   const extendCollection = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/collections/${id}?token=${token}`, {
+      const res = await api(`/api/collections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ extend: true }),
@@ -189,7 +218,7 @@ export default function AdminCollectionPage() {
       );
       await Promise.all(
         unverified.map((c) =>
-          fetch(`/api/contributions/${c.id}?token=${token}`, {
+          api(`/api/contributions/${c.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "verified" }),
@@ -203,7 +232,7 @@ export default function AdminCollectionPage() {
 
   const addManualPayment = useMutation({
     mutationFn: async ({ name, amount, status }) => {
-      const res = await fetch("/api/contributions", {
+      const res = await api("/api/contributions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -211,7 +240,6 @@ export default function AdminCollectionPage() {
           name,
           amount: amount ? parseFloat(amount) : undefined,
           status,
-          token,
         }),
       });
       if (!res.ok) throw new Error("Misslyckades");
@@ -644,6 +672,51 @@ export default function AdminCollectionPage() {
             </table>
           </div>
         </div>
+
+        {/* Activity log */}
+        {collection.audit && collection.audit.length > 0 && (
+          <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm overflow-hidden">
+            <button
+              onClick={() => setShowAudit(!showAudit)}
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-[#F8F6FF] transition-colors"
+            >
+              <span className="flex items-center gap-2 text-sm font-bold text-[#1A1A2E]">
+                <History size={15} className="text-[#5B3FA8]" /> Aktivitetslogg
+              </span>
+              <span className="text-xs text-[#9B9BB5]">
+                {collection.audit.length} händelser {showAudit ? "▲" : "▼"}
+              </span>
+            </button>
+            {showAudit && (
+              <ul className="divide-y divide-[#F0EBFF] border-t border-[#E8E0FF]">
+                {collection.audit.map((e, i) => {
+                  const { label, extra } = describeAudit(e);
+                  return (
+                    <li
+                      key={i}
+                      className="px-5 py-3 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#1A1A2E]">
+                          {label}
+                        </p>
+                        {extra && (
+                          <p className="text-xs text-[#9B9BB5] truncate">{extra}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-[#C4C4D4] shrink-0">
+                        {new Date(e.created_at).toLocaleString("sv-SE", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* Footer share */}
         <div className="bg-white rounded-2xl border border-[#E8E0FF] p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">

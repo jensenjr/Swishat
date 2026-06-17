@@ -21,3 +21,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Archives (never commit build/scaffold zips)
+*.zip

@@ -1,25 +1,57 @@
 import { Hono } from 'hono';
+import { randomUUID } from 'node:crypto';
 import sql from '../db.js';
 import argon2 from 'argon2';
+import { rateLimit, AttemptLimiter } from '../middleware/rateLimit.js';
+import { getAdminToken, tokensMatch } from '../lib/auth.js';
+import { getClientIp } from '../lib/clientIp.js';
+import { recordAudit, getAuditLog } from '../lib/audit.js';
+import {
+  ValidationError,
+  requireText,
+  optionalText,
+  optionalAmount,
+  MAX_TARGET,
+  LIMITS,
+} from '../lib/validate.js';
 
 const app = new Hono();
 
-function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+// Columns safe to return to a client. Never includes pin_hash; admin_token is
+// added explicitly only on the create response (the owner needs it once).
+const PUBLIC_COLLECTION_COLUMNS = sql`
+  id, title, description, target_amount, swish_number, suggested_amount,
+  require_proof, is_active, expires_at, hard_cap_at,
+  last_admin_activity_at, last_contribution_at, created_at
+`;
+
+// Brute-force lockout for credential recovery, keyed on the targeted Swish
+// number. Designed to also cover the planned SMS-code recovery endpoint.
+const recoveryLockout = new AttemptLimiter({
+  maxFailures: 5,
+  lockMs: 15 * 60 * 1000,
+});
+
+// IP-based limiters. Recovery and creation are the abuse-prone endpoints.
+const recoverRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+const createRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
 
 // POST /api/collections/recover — must be before /:id
-app.post('/collections/recover', async (c) => {
+app.post('/collections/recover', recoverRateLimit, async (c) => {
   try {
     const body = await c.req.json();
     const { swish_number, pin } = body;
 
     if (!swish_number || !pin) {
       return c.json({ error: 'Swish-nummer och PIN-kod krävs' }, 400);
+    }
+
+    const lockKey = String(swish_number).trim();
+    if (recoveryLockout.isLocked(lockKey)) {
+      return c.json(
+        { error: 'För många misslyckade försök. Försök igen om en stund.' },
+        429,
+      );
     }
 
     const collections = await sql`
@@ -31,16 +63,10 @@ app.post('/collections/recover', async (c) => {
       ORDER BY created_at DESC
     `;
 
-    if (!collections.length) {
-      return c.json(
-        { error: 'Ingen insamling hittades med detta Swish-nummer och PIN-kod' },
-        404,
-      );
-    }
-
     for (const collection of collections) {
       const match = await argon2.verify(collection.pin_hash, pin.toString());
       if (match) {
+        recoveryLockout.clear(lockKey);
         return c.json({
           id: collection.id,
           title: collection.title,
@@ -49,6 +75,9 @@ app.post('/collections/recover', async (c) => {
       }
     }
 
+    // Single generic response whether the number is unknown or the PIN is
+    // wrong, so the endpoint can't be used to enumerate Swish numbers.
+    recoveryLockout.recordFailure(lockKey);
     return c.json({ error: 'Felaktigt Swish-nummer eller PIN-kod' }, 401);
   } catch (error) {
     console.error('Error recovering collection:', error);
@@ -57,16 +86,18 @@ app.post('/collections/recover', async (c) => {
 });
 
 // POST /api/collections
-app.post('/collections', async (c) => {
+app.post('/collections', createRateLimit, async (c) => {
   try {
     const body = await c.req.json();
-    const { title, description, target_amount, swish_number, suggested_amount, require_proof, pin } = body;
+    const { require_proof, pin } = body;
 
-    if (!title || !swish_number) {
-      return c.json({ error: 'Titel och Swish-nummer krävs' }, 400);
-    }
+    const title = requireText(body.title, 'Titel', LIMITS.title);
+    const swish_number = requireText(body.swish_number, 'Swish-nummer', LIMITS.swishNumber);
+    const description = optionalText(body.description, 'Beskrivning', LIMITS.description);
+    const target_amount = optionalAmount(body.target_amount, { field: 'Målbelopp', max: MAX_TARGET });
+    const suggested_amount = optionalAmount(body.suggested_amount, { field: 'Rekommenderat belopp' });
 
-    const admin_token = generateUUID();
+    const admin_token = randomUUID();
 
     let pin_hash = null;
     if (pin && String(pin).length >= 4) {
@@ -79,21 +110,24 @@ app.post('/collections', async (c) => {
         require_proof, admin_token, pin_hash, expires_at, hard_cap_at, last_admin_activity_at
       ) VALUES (
         ${title},
-        ${description || null},
-        ${target_amount ? Number(target_amount) : null},
+        ${description},
+        ${target_amount},
         ${swish_number},
-        ${suggested_amount ? Number(suggested_amount) : null},
-        ${require_proof || false},
+        ${suggested_amount},
+        ${require_proof === true},
         ${admin_token},
         ${pin_hash},
         NOW() + INTERVAL '14 days',
         NOW() + INTERVAL '30 days',
         NOW()
-      ) RETURNING *
+      ) RETURNING ${PUBLIC_COLLECTION_COLUMNS}, admin_token
     `;
 
     return c.json(collection);
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return c.json({ error: error.message }, 400);
+    }
     console.error('Error creating collection:', error);
     return c.json({ error: 'Kunde inte skapa insamlingen' }, 500);
   }
@@ -102,7 +136,7 @@ app.post('/collections', async (c) => {
 // GET /api/collections/:id
 app.get('/collections/:id', async (c) => {
   const id = c.req.param('id');
-  const token = c.req.query('token');
+  const token = getAdminToken(c);
 
   try {
     const [collection] = await sql`
@@ -159,13 +193,14 @@ app.get('/collections/:id', async (c) => {
       SELECT admin_token FROM collections WHERE id = ${id}
     `;
 
-    if (token && adminRow?.admin_token === token) {
+    if (token && adminRow && tokensMatch(token, adminRow.admin_token)) {
       const contributions = await sql`
         SELECT * FROM contributions
         WHERE collection_id = ${id}
         ORDER BY created_at DESC
       `;
       result.contributions = contributions;
+      result.audit = await getAuditLog(id);
       result.isAdmin = true;
     }
 
@@ -179,14 +214,14 @@ app.get('/collections/:id', async (c) => {
 // PATCH /api/collections/:id
 app.patch('/collections/:id', async (c) => {
   const id = c.req.param('id');
-  const token = c.req.query('token');
+  const token = getAdminToken(c);
 
   try {
     const [adminRow] = await sql`
       SELECT admin_token, expires_at, hard_cap_at FROM collections WHERE id = ${id}
     `;
 
-    if (!token || adminRow?.admin_token !== token) {
+    if (!token || !adminRow || !tokensMatch(token, adminRow.admin_token)) {
       return c.json({ error: 'Obehörig' }, 401);
     }
 
@@ -203,18 +238,29 @@ app.patch('/collections/:id', async (c) => {
         UPDATE collections
         SET expires_at = ${finalExpiry.toISOString()}, last_admin_activity_at = NOW()
         WHERE id = ${id}
-        RETURNING *
+        RETURNING ${PUBLIC_COLLECTION_COLUMNS}
       `;
+      await recordAudit({
+        collectionId: id,
+        action: 'collection.extend',
+        detail: { expires_at: finalExpiry.toISOString() },
+        ip: getClientIp(c),
+      });
       return c.json(updated);
     }
 
     if (is_active !== undefined) {
       const [updated] = await sql`
         UPDATE collections
-        SET is_active = ${is_active}, last_admin_activity_at = NOW()
+        SET is_active = ${is_active === true}, last_admin_activity_at = NOW()
         WHERE id = ${id}
-        RETURNING *
+        RETURNING ${PUBLIC_COLLECTION_COLUMNS}
       `;
+      await recordAudit({
+        collectionId: id,
+        action: is_active === true ? 'collection.reopen' : 'collection.close',
+        ip: getClientIp(c),
+      });
       return c.json(updated);
     }
 
