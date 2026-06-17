@@ -120,7 +120,7 @@ app.post('/collections/recover/sms/request', smsRequestRateLimit, async (c) => {
       try {
         await sendSms(
           toE164Swedish(number),
-          `Din kod för Swish Insamling: ${code}. Den gäller i 10 minuter.`,
+          `Swishat återställningskod: ${code}. Gäller i 10 minuter. Dela aldrig koden med någon.`,
         );
         // Only persist once the SMS was accepted by the provider.
         await storeCode(number, code);

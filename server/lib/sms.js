@@ -20,7 +20,7 @@ export function toE164Swedish(raw) {
 
 export async function sendSms(to, message) {
   if (!smsConfigured()) throw new Error('SMS is not configured');
-  const from = process.env.ELKS_FROM || 'SwishInsa';
+  const from = process.env.ELKS_FROM || 'Swishat';
   const auth = Buffer.from(
     `${process.env.ELKS_API_USERNAME}:${process.env.ELKS_API_PASSWORD}`,
   ).toString('base64');
