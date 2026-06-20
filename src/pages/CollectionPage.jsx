@@ -152,22 +152,81 @@ export default function CollectionPublicPage() {
       </div>
     );
 
-  if (!collection.is_active || collection.expiry?.isExpired)
+  if (!collection.is_active || collection.expiry?.isExpired) {
+    const collected = Number(collection.stats?.total_collected || 0);
+    const contributors = collection.stats?.verified_count || 0;
+    const target = collection.target_amount
+      ? Number(collection.target_amount)
+      : null;
+    const reached = target != null && collected >= target;
+    const pct = target ? Math.min(100, Math.round((collected / target) * 100)) : null;
+    const fmt = (n) => Number(n).toLocaleString("sv-SE");
+
+    let summary;
+    if (target == null) {
+      summary = `Insamlingen är avslutad. Totalt insamlat: ${fmt(collected)} kr.`;
+    } else if (reached) {
+      summary = `Insamlingen stängdes efter att målet på ${fmt(target)} kr uppnåddes 🎉`;
+    } else {
+      summary = `Insamlingen stängdes innan målet på ${fmt(target)} kr nåddes – ${fmt(collected)} kr samlades in (${pct}% av målet).`;
+    }
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5f0ff] to-[#fff8f0]">
-        <div className="bg-white rounded-2xl border border-[#E8E0FF] p-8 max-w-sm mx-4 text-center space-y-3">
+        <div className="bg-white rounded-2xl border border-[#E8E0FF] p-8 max-w-sm mx-4 text-center space-y-4">
           <div className="w-14 h-14 rounded-full bg-[#F0EBFF] flex items-center justify-center mx-auto text-2xl">
-            🔒
+            {reached ? "🎉" : "🔒"}
           </div>
           <h2 className="font-extrabold text-[#1A1A2E] text-xl">
             Insamlingen är stängd
           </h2>
-          <p className="text-sm text-[#9B9BB5]">
+          <p className="text-sm text-[#6B6B8D] leading-relaxed">{summary}</p>
+
+          <div className="bg-[#F8F6FF] border border-[#E8E0FF] rounded-xl p-4 space-y-3 text-left">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-bold text-[#9B9BB5] uppercase tracking-wider">
+                Insamlat
+              </span>
+              <span className="text-lg font-extrabold text-[#1A1A2E]">
+                {fmt(collected)} kr
+                {target != null && (
+                  <span className="text-sm font-medium text-[#9B9BB5]">
+                    {" "}
+                    / {fmt(target)} kr
+                  </span>
+                )}
+              </span>
+            </div>
+            {target != null && (
+              <div className="h-2 rounded-full bg-[#E8E0FF] overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${pct}%`,
+                    background: reached
+                      ? "linear-gradient(90deg, #16a34a, #4ade80)"
+                      : "linear-gradient(90deg, #5B3FA8, #FF8C3B)",
+                  }}
+                />
+              </div>
+            )}
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-bold text-[#9B9BB5] uppercase tracking-wider">
+                Bidragsgivare
+              </span>
+              <span className="text-sm font-bold text-[#1A1A2E]">
+                {contributors} st
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#C4C4D4]">
             Denna insamling tar inte längre emot bidrag.
           </p>
         </div>
       </div>
     );
+  }
 
   const progress = collection.target_amount
     ? Math.min(

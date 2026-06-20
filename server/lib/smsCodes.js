@@ -9,8 +9,26 @@ import sql from '../db.js';
 import argon2 from 'argon2';
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const RESEND_COOLDOWN_MS = 60 * 1000; // min gap between sends to one number
 const MAX_ATTEMPTS = 5;
+
+// Per-number send limits (IP-independent) so a number can't be SMS-bombed even
+// from rotating IPs. Configurable via env so they can be tuned per deployment.
+// Uses a default only when unset/invalid — an explicit 0 is honoured.
+function envInt(name, def) {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v >= 0 ? v : def;
+}
+const RESEND_COOLDOWN_MS = envInt('SMS_RESEND_COOLDOWN_SEC', 60) * 1000;
+const MAX_PER_HOUR = envInt('SMS_MAX_PER_HOUR', 3);
+const MAX_PER_DAY = envInt('SMS_MAX_PER_DAY', 10);
+
+// Periodically prune the send log so it can't grow unbounded.
+const sendsSweep = setInterval(() => {
+  sql`DELETE FROM sms_sends WHERE created_at < NOW() - INTERVAL '25 hours'`.catch(
+    (err) => console.error('sms_sends sweep failed:', err.message),
+  );
+}, 60 * 60 * 1000);
+sendsSweep.unref?.();
 
 export async function ensureSmsSchema() {
   try {
@@ -23,19 +41,48 @@ export async function ensureSmsSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `;
+    // Append-only log of actual sends, used for the per-number rate caps.
+    await sql`
+      CREATE TABLE IF NOT EXISTS sms_sends (
+        id BIGSERIAL PRIMARY KEY,
+        swish_number TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS sms_sends_number_time_idx
+      ON sms_sends (swish_number, created_at DESC)
+    `;
   } catch (err) {
     console.error('SMS recovery storage unavailable:', err.message);
   }
 }
 
-// True if no code was sent to this number within the cooldown window. Prevents
-// using the request endpoint to flood a victim's phone.
+// Whether another code may be sent to this number now: enforces a short
+// cooldown plus rolling hourly and daily caps. Counts actual sends only.
 export async function canSend(swishNumber) {
-  const [row] = await sql`
-    SELECT created_at FROM sms_codes WHERE swish_number = ${swishNumber}
+  const [s] = await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') AS last_hour,
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 day')  AS last_day,
+      MAX(created_at) AS last_sent
+    FROM sms_sends
+    WHERE swish_number = ${swishNumber}
   `;
-  if (!row) return true;
-  return Date.now() - new Date(row.created_at).getTime() > RESEND_COOLDOWN_MS;
+  if (!s || !s.last_sent) return true;
+  if (Date.now() - new Date(s.last_sent).getTime() < RESEND_COOLDOWN_MS) return false;
+  if (Number(s.last_hour) >= MAX_PER_HOUR) return false;
+  if (Number(s.last_day) >= MAX_PER_DAY) return false;
+  return true;
+}
+
+// Record an actual send (after the SMS was accepted by the provider).
+export async function recordSend(swishNumber) {
+  await sql`INSERT INTO sms_sends (swish_number) VALUES (${swishNumber})`;
+  await sql`
+    DELETE FROM sms_sends
+    WHERE swish_number = ${swishNumber} AND created_at < NOW() - INTERVAL '25 hours'
+  `;
 }
 
 export async function storeCode(swishNumber, code) {

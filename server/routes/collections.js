@@ -7,7 +7,7 @@ import { getAdminToken, tokensMatch } from '../lib/auth.js';
 import { getClientIp } from '../lib/clientIp.js';
 import { recordAudit, getAuditLog } from '../lib/audit.js';
 import { smsConfigured, sendSms, toE164Swedish } from '../lib/sms.js';
-import { canSend, storeCode, verifyCode } from '../lib/smsCodes.js';
+import { canSend, storeCode, verifyCode, recordSend } from '../lib/smsCodes.js';
 import {
   ValidationError,
   requireText,
@@ -124,6 +124,7 @@ app.post('/collections/recover/sms/request', smsRequestRateLimit, async (c) => {
         );
         // Only persist once the SMS was accepted by the provider.
         await storeCode(number, code);
+        await recordSend(number);
       } catch (err) {
         console.error('SMS send failed:', err.message);
       }

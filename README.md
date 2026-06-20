@@ -79,9 +79,10 @@ CREATE TABLE contributions (
 );
 ```
 
-> ℹ️ Tabellerna `audit_log` (revisionslogg över adminåtgärder) och `sms_codes`
-> (engångskoder för SMS-återställning) skapas automatiskt vid serverstart
-> (`CREATE TABLE IF NOT EXISTS`) — du behöver inte köra dem manuellt.
+> ℹ️ Tabellerna `audit_log` (revisionslogg över adminåtgärder), `sms_codes`
+> (engångskoder för SMS-återställning) och `sms_sends` (sändningslogg för
+> abuse-gränser) skapas automatiskt vid serverstart (`CREATE TABLE IF NOT
+> EXISTS`) — du behöver inte köra dem manuellt.
 
 ### 2. Applikation
 
@@ -171,6 +172,7 @@ Vite proxar automatiskt `/api/*` till `localhost:5000`.
 - PIN-koder hashas med `argon2` och sparas aldrig i klartext
 - PIN-återhämtning skyddas av hastighetsbegränsning + utelåsning efter upprepade misslyckanden
 - SMS-återhämtning: engångskoder hashas och lagras med utgångstid + försöksgräns; begränsad sändningstakt
+- SMS-sändning har per-nummer-gränser (cooldown + max per timme/dygn, IP-oberoende) mot SMS-bombning; ingen SMS skickas till nummer utan koppling till en insamling
 - Hastighetsbegränsning på skapande och bidrag
 - Server-side validering av belopp och textlängder
 - Säkerhetsheaders (CSP, `frame-ancestors 'none'`, `no-referrer`) och gräns på förfrågans storlek
