@@ -12,6 +12,7 @@ import {
   PlusCircle,
   X,
   History,
+  ImagePlus,
 } from "lucide-react";
 
 const AUDIT_LABELS = {
@@ -21,6 +22,8 @@ const AUDIT_LABELS = {
   "collection.extend": "Insamling förlängd",
   "collection.close": "Insamling stängd",
   "collection.reopen": "Insamling återöppnad",
+  "collection.cover_update": "Omslagsbild uppdaterad",
+  "collection.cover_remove": "Omslagsbild borttagen",
 };
 
 function describeAudit(entry) {
@@ -230,6 +233,34 @@ export default function AdminCollectionPage() {
       queryClient.invalidateQueries(["collection-admin", id, token]),
   });
 
+  const uploadCover = useMutation({
+    mutationFn: async (file) => {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await api(`/api/collections/${id}/cover`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Uppladdning misslyckades");
+      }
+      return res.json();
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries(["collection-admin", id, token]),
+  });
+
+  const removeCover = useMutation({
+    mutationFn: async () => {
+      const res = await api(`/api/collections/${id}/cover`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Misslyckades");
+      return res.json();
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries(["collection-admin", id, token]),
+  });
+
   const addManualPayment = useMutation({
     mutationFn: async ({ name, amount, status }) => {
       const res = await api("/api/contributions", {
@@ -408,6 +439,57 @@ export default function AdminCollectionPage() {
                 : "Öppna insamlingen igen →"}
             </button>
           </div>
+        </div>
+
+        {/* Cover image */}
+        <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm p-5">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h3 className="text-sm font-bold text-[#1A1A2E] flex items-center gap-2">
+              <ImagePlus size={15} className="text-[#5B3FA8]" /> Omslagsbild
+            </h3>
+            {collection.cover_image && (
+              <button
+                onClick={() => removeCover.mutate()}
+                disabled={removeCover.isPending}
+                className="text-xs font-bold text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-100 transition-colors disabled:opacity-50"
+              >
+                Ta bort
+              </button>
+            )}
+          </div>
+          {collection.cover_image && (
+            <img
+              src={collection.cover_image}
+              alt="Omslag"
+              className="w-full h-40 object-cover rounded-xl border border-[#E8E0FF] mb-3"
+            />
+          )}
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-[#5B3FA8] px-4 py-2.5 rounded-xl border border-[#E8E0FF] bg-white hover:bg-[#F8F6FF] transition-colors cursor-pointer w-fit">
+            <ImagePlus size={15} />
+            {uploadCover.isPending
+              ? "Laddar upp…"
+              : collection.cover_image
+                ? "Byt bild"
+                : "Ladda upp bild"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadCover.mutate(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <p className="text-xs text-[#9B9BB5] mt-2">
+            JPG, PNG eller WEBP, max 3 MB. Visas på sidan och när länken delas.
+          </p>
+          {uploadCover.isError && (
+            <p className="text-sm text-red-500 mt-2">
+              {uploadCover.error?.message}
+            </p>
+          )}
         </div>
 
         {/* Manual payment */}

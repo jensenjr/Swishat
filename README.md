@@ -97,9 +97,21 @@ CREATE TABLE contributions (
 | `ELKS_API_USERNAME` | 46elks API-användarnamn (valfritt – för SMS) |
 | `ELKS_API_PASSWORD` | 46elks API-lösenord (valfritt – för SMS) |
 | `ELKS_FROM` | Avsändare: namn (max 11 tecken) eller 46elks-nummer (valfritt) |
+| `STORAGE_DRIVER` | `local` (standard) eller `s3` för omslagsbilder |
+| `UPLOAD_DIR` | Sökväg för bilder vid `local` (peka mot en Coolify-volym, t.ex. `/app/uploads`) |
+| `S3_*` | Endast vid `s3` — se `.env.example` |
 
 > 🔐 SMS-uppgifterna anges **endast** i Coolifys miljövariabler — aldrig i koden eller `.env.example`.
 > Lämna dem tomma för att stänga av SMS-funktioner.
+
+#### Omslagsbilder (lagring)
+
+- **`local` (standard):** bilder skrivs till `UPLOAD_DIR` och serveras av appen på `/uploads/*`.
+  I Coolify: lägg till en **Persistent Storage**-volym monterad på t.ex. `/app/uploads` och
+  sätt `UPLOAD_DIR=/app/uploads`, annars försvinner bilderna vid varje deploy.
+- **`s3`:** valfri S3-kompatibel lagring (AWS S3, Cloudflare R2, MinIO). Inga extra
+  npm-beroenden — anrop signeras med SigV4. Sätt `S3_ENDPOINT`, `S3_BUCKET`,
+  `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` och `S3_PUBLIC_BASE_URL`.
 
 ### 3. Bygg & start
 

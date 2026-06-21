@@ -8,6 +8,7 @@ import { getClientIp } from '../lib/clientIp.js';
 import { recordAudit, getAuditLog } from '../lib/audit.js';
 import { smsConfigured, sendSms, toE164Swedish } from '../lib/sms.js';
 import { canSend, storeCode, verifyCode, recordSend } from '../lib/smsCodes.js';
+import { saveImage, removeImage, extForType } from '../lib/storage.js';
 import {
   ValidationError,
   requireText,
@@ -23,7 +24,7 @@ const app = new Hono();
 // added explicitly only on the create response (the owner needs it once).
 const PUBLIC_COLLECTION_COLUMNS = sql`
   id, title, description, target_amount, swish_number, suggested_amount,
-  require_proof, is_active, expires_at, hard_cap_at,
+  require_proof, is_active, expires_at, hard_cap_at, cover_image,
   last_admin_activity_at, last_contribution_at, created_at
 `;
 
@@ -230,7 +231,7 @@ app.get('/collections/:id', async (c) => {
     const [collection] = await sql`
       SELECT id, title, description, target_amount, swish_number, suggested_amount,
              is_active, created_at, require_proof, expires_at, hard_cap_at,
-             last_admin_activity_at, last_contribution_at
+             cover_image, last_admin_activity_at, last_contribution_at
       FROM collections
       WHERE id = ${id}
     `;
@@ -356,6 +357,86 @@ app.patch('/collections/:id', async (c) => {
   } catch (error) {
     console.error('Error updating collection:', error);
     return c.json({ error: 'Kunde inte uppdatera insamlingen' }, 500);
+  }
+});
+
+// Magic-byte sniff so a renamed/disguised file can't pass the type check.
+function looksLikeImage(buf, contentType) {
+  if (buf.length < 12) return false;
+  if (contentType === 'image/jpeg') return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  if (contentType === 'image/png')
+    return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  if (contentType === 'image/webp')
+    return buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP';
+  return false;
+}
+
+// POST /api/collections/:id/cover — admin uploads a cover image (multipart).
+app.post('/collections/:id/cover', async (c) => {
+  const id = c.req.param('id');
+  const token = getAdminToken(c);
+  try {
+    const [adminRow] = await sql`
+      SELECT admin_token, cover_image FROM collections WHERE id = ${id}
+    `;
+    if (!token || !adminRow || !tokensMatch(token, adminRow.admin_token)) {
+      return c.json({ error: 'Obehörig' }, 401);
+    }
+
+    const body = await c.req.parseBody();
+    const file = body['image'];
+    if (!file || typeof file === 'string') {
+      return c.json({ error: 'Ingen bild bifogad' }, 400);
+    }
+    const contentType = file.type;
+    if (!extForType(contentType)) {
+      return c.json({ error: 'Endast JPG, PNG eller WEBP tillåts' }, 400);
+    }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    if (buffer.length === 0) return c.json({ error: 'Tom fil' }, 400);
+    if (buffer.length > 3 * 1024 * 1024) {
+      return c.json({ error: 'Bilden är för stor (max 3 MB)' }, 400);
+    }
+    if (!looksLikeImage(buffer, contentType)) {
+      return c.json({ error: 'Filen verkar inte vara en giltig bild' }, 400);
+    }
+
+    const url = await saveImage(buffer, { contentType });
+    const [updated] = await sql`
+      UPDATE collections SET cover_image = ${url}, last_admin_activity_at = NOW()
+      WHERE id = ${id} RETURNING cover_image
+    `;
+    if (adminRow.cover_image && adminRow.cover_image !== url) {
+      removeImage(adminRow.cover_image).catch(() => {});
+    }
+    await recordAudit({ collectionId: id, action: 'collection.cover_update', ip: getClientIp(c) });
+    return c.json({ cover_image: updated.cover_image });
+  } catch (error) {
+    console.error('Cover upload error:', error);
+    return c.json({ error: 'Kunde inte ladda upp bilden' }, 500);
+  }
+});
+
+// DELETE /api/collections/:id/cover — admin removes the cover image.
+app.delete('/collections/:id/cover', async (c) => {
+  const id = c.req.param('id');
+  const token = getAdminToken(c);
+  try {
+    const [adminRow] = await sql`
+      SELECT admin_token, cover_image FROM collections WHERE id = ${id}
+    `;
+    if (!token || !adminRow || !tokensMatch(token, adminRow.admin_token)) {
+      return c.json({ error: 'Obehörig' }, 401);
+    }
+    if (adminRow.cover_image) removeImage(adminRow.cover_image).catch(() => {});
+    await sql`
+      UPDATE collections SET cover_image = NULL, last_admin_activity_at = NOW() WHERE id = ${id}
+    `;
+    await recordAudit({ collectionId: id, action: 'collection.cover_remove', ip: getClientIp(c) });
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Cover delete error:', error);
+    return c.json({ error: 'Kunde inte ta bort bilden' }, 500);
   }
 });
 
