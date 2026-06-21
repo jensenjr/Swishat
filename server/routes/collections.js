@@ -9,6 +9,7 @@ import { recordAudit, getAuditLog } from '../lib/audit.js';
 import { smsConfigured, sendSms, toE164Swedish } from '../lib/sms.js';
 import { canSend, storeCode, verifyCode, recordSend } from '../lib/smsCodes.js';
 import { saveImage, removeImage, extForType } from '../lib/storage.js';
+import { getUpdates } from '../lib/updates.js';
 import {
   ValidationError,
   requireText,
@@ -276,6 +277,7 @@ app.get('/collections/:id', async (c) => {
         isAtHardCap: daysUntilHardCap <= 0,
         isNearHardCap: daysUntilHardCap <= 7,
       },
+      updates: await getUpdates(id),
     };
 
     const [adminRow] = await sql`
@@ -437,6 +439,57 @@ app.delete('/collections/:id/cover', async (c) => {
   } catch (error) {
     console.error('Cover delete error:', error);
     return c.json({ error: 'Kunde inte ta bort bilden' }, 500);
+  }
+});
+
+// POST /api/collections/:id/updates — admin publishes a campaign update.
+app.post('/collections/:id/updates', async (c) => {
+  const id = c.req.param('id');
+  const token = getAdminToken(c);
+  try {
+    const [coll] = await sql`SELECT admin_token FROM collections WHERE id = ${id}`;
+    if (!token || !coll || !tokensMatch(token, coll.admin_token)) {
+      return c.json({ error: 'Obehörig' }, 401);
+    }
+    const reqBody = await c.req.json();
+    const title = optionalText(reqBody.title, 'Rubrik', LIMITS.updateTitle);
+    const body = requireText(reqBody.body, 'Text', LIMITS.updateBody);
+
+    const [update] = await sql`
+      INSERT INTO campaign_updates (collection_id, title, body)
+      VALUES (${id}, ${title}, ${body})
+      RETURNING id, title, body, created_at
+    `;
+    await sql`UPDATE collections SET last_admin_activity_at = NOW() WHERE id = ${id}`;
+    await recordAudit({ collectionId: id, action: 'update.create', ip: getClientIp(c) });
+    return c.json(update);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return c.json({ error: error.message }, 400);
+    }
+    console.error('Create update error:', error);
+    return c.json({ error: 'Kunde inte publicera uppdateringen' }, 500);
+  }
+});
+
+// DELETE /api/collections/:id/updates/:updateId — admin removes an update.
+app.delete('/collections/:id/updates/:updateId', async (c) => {
+  const id = c.req.param('id');
+  const updateId = c.req.param('updateId');
+  const token = getAdminToken(c);
+  try {
+    const [coll] = await sql`SELECT admin_token FROM collections WHERE id = ${id}`;
+    if (!token || !coll || !tokensMatch(token, coll.admin_token)) {
+      return c.json({ error: 'Obehörig' }, 401);
+    }
+    await sql`
+      DELETE FROM campaign_updates WHERE id = ${updateId} AND collection_id = ${id}
+    `;
+    await recordAudit({ collectionId: id, action: 'update.delete', ip: getClientIp(c) });
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Delete update error:', error);
+    return c.json({ error: 'Kunde inte ta bort uppdateringen' }, 500);
   }
 });
 

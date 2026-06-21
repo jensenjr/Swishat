@@ -15,6 +15,7 @@ import {
   ImagePlus,
   Search,
   ArrowDownWideNarrow,
+  Megaphone,
 } from "lucide-react";
 
 const AUDIT_LABELS = {
@@ -27,6 +28,8 @@ const AUDIT_LABELS = {
   "collection.reopen": "Insamling återöppnad",
   "collection.cover_update": "Omslagsbild uppdaterad",
   "collection.cover_remove": "Omslagsbild borttagen",
+  "update.create": "Uppdatering publicerad",
+  "update.delete": "Uppdatering borttagen",
 };
 
 function describeAudit(entry) {
@@ -130,6 +133,7 @@ export default function AdminCollectionPage() {
   const [search, setSearch] = useState("");
   const [sortByAmount, setSortByAmount] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
+  const [updateForm, setUpdateForm] = useState({ title: "", body: "" });
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -275,6 +279,37 @@ export default function AdminCollectionPage() {
   const removeCover = useMutation({
     mutationFn: async () => {
       const res = await api(`/api/collections/${id}/cover`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Misslyckades");
+      return res.json();
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries(["collection-admin", id, token]),
+  });
+
+  const postUpdate = useMutation({
+    mutationFn: async ({ title, body }) => {
+      const res = await api(`/api/collections/${id}/updates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title || undefined, body }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Kunde inte publicera");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setUpdateForm({ title: "", body: "" });
+      queryClient.invalidateQueries(["collection-admin", id, token]);
+    },
+  });
+
+  const deleteUpdate = useMutation({
+    mutationFn: async (updateId) => {
+      const res = await api(`/api/collections/${id}/updates/${updateId}`, {
+        method: "DELETE",
+      });
       if (!res.ok) throw new Error("Misslyckades");
       return res.json();
     },
@@ -541,6 +576,79 @@ export default function AdminCollectionPage() {
             <p className="text-sm text-red-500 mt-2">
               {uploadCover.error?.message}
             </p>
+          )}
+        </div>
+
+        {/* Updates */}
+        <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm p-5 space-y-4">
+          <h3 className="text-sm font-bold text-[#1A1A2E] flex items-center gap-2">
+            <Megaphone size={15} className="text-[#5B3FA8]" /> Uppdateringar
+          </h3>
+          <div className="space-y-2.5">
+            <input
+              type="text"
+              placeholder="Rubrik (valfritt)"
+              className="swish-input"
+              value={updateForm.title}
+              onChange={(e) =>
+                setUpdateForm({ ...updateForm, title: e.target.value })
+              }
+            />
+            <textarea
+              rows={3}
+              placeholder="Skriv en uppdatering till bidragsgivarna…"
+              className="swish-input resize-none"
+              value={updateForm.body}
+              onChange={(e) =>
+                setUpdateForm({ ...updateForm, body: e.target.value })
+              }
+            />
+            {postUpdate.isError && (
+              <p className="text-sm text-red-500">{postUpdate.error?.message}</p>
+            )}
+            <button
+              onClick={() => {
+                if (updateForm.body.trim()) postUpdate.mutate(updateForm);
+              }}
+              disabled={postUpdate.isPending || !updateForm.body.trim()}
+              className="px-5 py-2.5 rounded-xl font-bold text-white text-sm hover:opacity-90 transition-all disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg, #5B3FA8, #0099CC)" }}
+            >
+              {postUpdate.isPending ? "Publicerar…" : "Publicera uppdatering"}
+            </button>
+          </div>
+          {collection.updates?.length > 0 && (
+            <div className="space-y-3 pt-2 border-t border-[#F0EBFF]">
+              {collection.updates.map((u) => (
+                <div key={u.id} className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs text-[#9B9BB5]">
+                      {new Date(u.created_at).toLocaleDateString("sv-SE", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </p>
+                    {u.title && (
+                      <p className="text-sm font-bold text-[#1A1A2E]">
+                        {u.title}
+                      </p>
+                    )}
+                    <p className="text-sm text-[#6B6B8D] whitespace-pre-wrap break-words">
+                      {u.body}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => deleteUpdate.mutate(u.id)}
+                    disabled={deleteUpdate.isPending}
+                    className="text-[#9B9BB5] hover:text-red-500 shrink-0 p-1 disabled:opacity-50"
+                    aria-label="Ta bort uppdatering"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 

@@ -24,6 +24,8 @@ export const LIMITS = {
   description: 2000,
   name: 100,
   swishNumber: 20,
+  updateTitle: 120,
+  updateBody: 5000,
 };
 
 export const CONTRIBUTION_STATUSES = ['verified', 'unverified'];
