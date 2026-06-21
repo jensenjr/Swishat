@@ -10,6 +10,8 @@ import collectionsRouter from './routes/collections.js';
 import contributionsRouter from './routes/contributions.js';
 import { ensureAuditSchema } from './lib/audit.js';
 import { ensureSmsSchema } from './lib/smsCodes.js';
+import sql from './db.js';
+import { buildOgTags, escapeHtml } from './lib/ogMeta.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -61,10 +63,53 @@ app.route('/api', collectionsRouter);
 app.route('/api', contributionsRouter);
 
 if (process.env.NODE_ENV === 'production') {
+  const indexHtml = readFileSync(join(__dirname, '../dist/index.html'), 'utf-8');
+
   app.use('/*', serveStatic({ root: './dist' }));
-  app.get('/*', (c) => {
-    const html = readFileSync(join(__dirname, '../dist/index.html'), 'utf-8');
-    return c.html(html);
+
+  app.get('/*', async (c) => {
+    // Public campaign page → inject per-campaign OpenGraph tags so shared links
+    // render a rich card. Crawlers don't run the SPA's JS, so this is server-side.
+    // Matches /c/:id but not /c/:id/admin.
+    const match = c.req.path.match(/^\/c\/([^/]+)\/?$/);
+    if (match) {
+      try {
+        const [col] = await sql`
+          SELECT title, description, target_amount FROM collections WHERE id = ${match[1]}
+        `;
+        if (col) {
+          const [stats] = await sql`
+            SELECT COUNT(*) AS count,
+                   COALESCE(SUM(amount) FILTER (WHERE status = 'verified'), 0) AS collected
+            FROM contributions WHERE collection_id = ${match[1]}
+          `;
+          // Canonical URL from forwarded headers (TLS terminates at the proxy,
+          // so c.req.url would otherwise report http://).
+          const proto = c.req.header('x-forwarded-proto') || 'https';
+          const host = c.req.header('x-forwarded-host') || c.req.header('host');
+          const url = host ? `${proto}://${host}${c.req.path}` : c.req.url;
+
+          const tags = buildOgTags({
+            title: col.title,
+            description: col.description,
+            collected: stats.collected,
+            target: col.target_amount,
+            count: stats.count,
+            url,
+          });
+          const html = indexHtml
+            .replace(
+              '<title>Swish Insamling</title>',
+              `<title>${escapeHtml(col.title)} · Swish Insamling</title>`,
+            )
+            .replace('</head>', `    ${tags}\n  </head>`);
+          return c.html(html);
+        }
+      } catch (err) {
+        console.error('OG injection failed:', err.message);
+      }
+    }
+    return c.html(indexHtml);
   });
 }
 
