@@ -7,6 +7,7 @@ import {
   Camera,
   Share2,
   MessageSquare,
+  Megaphone,
 } from "lucide-react";
 
 function SwishLogo({ size = 32 }) {
@@ -578,6 +579,36 @@ export default function CollectionPublicPage() {
             </div>
           )}
         </div>
+
+        {/* Updates */}
+        {collection.updates?.length > 0 && (
+          <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm p-6 space-y-4">
+            <h2 className="text-lg font-extrabold text-[#1A1A2E] flex items-center gap-2">
+              <Megaphone size={18} className="text-[#5B3FA8]" /> Uppdateringar
+            </h2>
+            <div className="space-y-5">
+              {collection.updates.map((u) => (
+                <div key={u.id} className="border-l-2 border-[#E8E0FF] pl-4">
+                  <p className="text-xs text-[#9B9BB5]">
+                    {new Date(u.created_at).toLocaleDateString("sv-SE", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </p>
+                  {u.title && (
+                    <p className="text-sm font-bold text-[#1A1A2E] mt-0.5">
+                      {u.title}
+                    </p>
+                  )}
+                  <p className="text-sm text-[#6B6B8D] mt-1 leading-relaxed whitespace-pre-wrap">
+                    {u.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Floating Share Button */}

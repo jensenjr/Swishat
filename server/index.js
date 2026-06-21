@@ -12,6 +12,7 @@ import contributionsRouter from './routes/contributions.js';
 import { ensureAuditSchema } from './lib/audit.js';
 import { ensureSmsSchema } from './lib/smsCodes.js';
 import { ensureSchemaMigrations } from './lib/migrations.js';
+import { ensureUpdatesSchema } from './lib/updates.js';
 import sql from './db.js';
 import { buildOgTags, escapeHtml } from './lib/ogMeta.js';
 
@@ -24,6 +25,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 await ensureAuditSchema();
 await ensureSmsSchema();
 await ensureSchemaMigrations();
+await ensureUpdatesSchema();
 
 const app = new Hono();
 
