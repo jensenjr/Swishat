@@ -1,15 +1,14 @@
 {
   "name": "swisat",
   "type": "module",
-  "version": "1.0.0",
+  "version": "0.4.0",
   "engines": {
     "node": ">=22.0.0"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "start": "node server/index.js",
-    "typecheck": "tsc --noEmit"
+    "start": "node server/index.js"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
