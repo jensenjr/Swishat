@@ -11,42 +11,8 @@ import {
   Search,
   MessageSquare,
 } from "lucide-react";
-
-function SwishLogo({ size = 36 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 36 36"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <linearGradient id="swishGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#5B3FA8" />
-          <stop offset="45%" stopColor="#0099CC" />
-          <stop offset="100%" stopColor="#FF8C3B" />
-        </linearGradient>
-      </defs>
-      <rect width="36" height="36" rx="10" fill="url(#swishGrad)" />
-      <path
-        d="M9 22C9 22 12 14 18 14C21 14 22.5 16 24 16C26 16 27 14 27 14"
-        stroke="white"
-        strokeWidth="3"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <path
-        d="M9 18C9 18 12 10 18 10C21 10 22.5 12 24 12C26 12 27 10 27 10"
-        stroke="white"
-        strokeWidth="2"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.45"
-      />
-    </svg>
-  );
-}
+import SwishLogo from "../components/SwishLogo";
+import { shareCollection } from "../lib/share";
 
 function Field({ label, children, required }) {
   return (
@@ -171,22 +137,16 @@ export default function HomePage() {
 
   const handleShare = async () => {
     if (!created) return;
-    const url = `${window.location.origin}/c/${created.id}`;
-    const parts = [`Här är länken till insamlingen "${created.title}"`];
-    if (created.target_amount) parts.push(`Mål: ${created.target_amount} kr`);
-    if (created.suggested_amount)
-      parts.push(`Rekommenderat belopp: ${created.suggested_amount} kr`);
-    parts.push(url);
-    const text = parts.join("\n");
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: created.title, text, url });
-      } else {
-        navigator.clipboard.writeText(text);
-      }
+    const ok = await shareCollection({
+      url: `${window.location.origin}/c/${created.id}`,
+      title: created.title,
+      targetAmount: created.target_amount,
+      suggestedAmount: created.suggested_amount,
+    });
+    if (ok) {
       setShareSuccess(true);
       setTimeout(() => setShareSuccess(false), 3000);
-    } catch (_) {}
+    }
   };
 
   if (created) {
