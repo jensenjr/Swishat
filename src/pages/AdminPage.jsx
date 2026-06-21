@@ -13,11 +13,14 @@ import {
   X,
   History,
   ImagePlus,
+  Search,
+  ArrowDownWideNarrow,
 } from "lucide-react";
 
 const AUDIT_LABELS = {
   "contribution.create_manual": "Manuell betalning tillagd",
   "contribution.update": "Bidrag uppdaterat",
+  "contribution.bulk_update": "Flera bidrag uppdaterade",
   "contribution.delete": "Bidrag borttaget",
   "collection.extend": "Insamling förlängd",
   "collection.close": "Insamling stängd",
@@ -124,6 +127,9 @@ export default function AdminCollectionPage() {
   const [showManual, setShowManual] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
   const [manualForm, setManualForm] = useState({ name: "", amount: "", status: "verified" });
+  const [search, setSearch] = useState("");
+  const [sortByAmount, setSortByAmount] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -214,20 +220,35 @@ export default function AdminCollectionPage() {
       queryClient.invalidateQueries(["collection-admin", id, token]),
   });
 
+  const bulkUpdate = useMutation({
+    mutationFn: async ({ ids, status }) => {
+      if (!ids.length) return { updated: 0 };
+      const res = await api("/api/contributions/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection_id: id, ids, status }),
+      });
+      if (!res.ok) throw new Error("Misslyckades");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSelected(new Set());
+      queryClient.invalidateQueries(["collection-admin", id, token]);
+    },
+  });
+
   const verifyAll = useMutation({
     mutationFn: async () => {
-      const unverified = (collection?.contributions || []).filter(
-        (c) => c.status === "unverified",
-      );
-      await Promise.all(
-        unverified.map((c) =>
-          api(`/api/contributions/${c.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "verified" }),
-          }),
-        ),
-      );
+      const ids = (collection?.contributions || [])
+        .filter((c) => c.status === "unverified")
+        .map((c) => c.id);
+      if (!ids.length) return;
+      const res = await api("/api/contributions/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection_id: id, ids, status: "verified" }),
+      });
+      if (!res.ok) throw new Error("Misslyckades");
     },
     onSuccess: () =>
       queryClient.invalidateQueries(["collection-admin", id, token]),
@@ -325,15 +346,46 @@ export default function AdminCollectionPage() {
       </div>
     );
 
-  const filtered = (collection.contributions || []).filter(
+  const q = search.trim().toLowerCase();
+  let filtered = (collection.contributions || []).filter(
     (c) => activeTab === "all" || c.status === activeTab,
   );
+  if (q)
+    filtered = filtered.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        (c.reference_code || "").toLowerCase().includes(q) ||
+        String(c.amount ?? "").includes(q),
+    );
+  if (sortByAmount)
+    filtered = [...filtered].sort(
+      (a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0),
+    );
+
   const unverifiedCount = (collection.contributions || []).filter(
     (c) => c.status === "unverified",
   ).length;
   const verifiedCount = (collection.contributions || []).filter(
     (c) => c.status === "verified",
   ).length;
+
+  const filteredIds = filtered.map((c) => c.id);
+  const allFilteredSelected =
+    filteredIds.length > 0 && filteredIds.every((cid) => selected.has(cid));
+  const toggleOne = (cid) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(cid) ? next.delete(cid) : next.add(cid);
+      return next;
+    });
+  const toggleAllFiltered = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) filteredIds.forEach((cid) => next.delete(cid));
+      else filteredIds.forEach((cid) => next.add(cid));
+      return next;
+    });
+  const selectedIds = [...selected];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#f5f0ff] to-[#fff8f0] font-inter">
@@ -605,6 +657,65 @@ export default function AdminCollectionPage() {
             )}
           </div>
 
+          {/* Search + sort (assisted matching against your Swish history) */}
+          <div className="border-b border-[#E8E0FF] px-5 py-2.5 flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[#C4C4D4]"
+              />
+              <input
+                type="text"
+                placeholder="Sök namn, referenskod eller belopp…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[#E8E0FF] bg-white outline-none focus:border-[#5B3FA8] transition-colors"
+              />
+            </div>
+            <button
+              onClick={() => setSortByAmount((v) => !v)}
+              className={`text-xs font-bold px-3 py-2 rounded-lg border transition-colors flex items-center gap-1.5 ${sortByAmount ? "bg-[#F0EBFF] text-[#5B3FA8] border-[#D9CCFF]" : "text-[#9B9BB5] border-[#E8E0FF] hover:bg-[#F8F6FF]"}`}
+            >
+              <ArrowDownWideNarrow size={13} /> Belopp
+            </button>
+          </div>
+
+          {/* Bulk action bar */}
+          {selectedIds.length > 0 && (
+            <div className="bg-[#F8F6FF] border-b border-[#E8E0FF] px-5 py-2.5 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-sm font-bold text-[#5B3FA8]">
+                {selectedIds.length} markerade
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    bulkUpdate.mutate({ ids: selectedIds, status: "verified" })
+                  }
+                  disabled={bulkUpdate.isPending}
+                  className="text-xs font-bold text-white px-3 py-1.5 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
+                  style={{ background: "linear-gradient(135deg, #5B3FA8, #0099CC)" }}
+                >
+                  <CheckCircle2 size={13} /> Verifiera markerade
+                </button>
+                <button
+                  onClick={() =>
+                    bulkUpdate.mutate({ ids: selectedIds, status: "unverified" })
+                  }
+                  disabled={bulkUpdate.isPending}
+                  className="text-xs font-bold text-[#9B9BB5] px-3 py-1.5 rounded-lg border border-[#E8E0FF] hover:bg-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <RotateCcw size={13} /> Ångra
+                </button>
+                <button
+                  onClick={() => setSelected(new Set())}
+                  className="text-xs font-bold text-[#9B9BB5] px-3 py-1.5 rounded-lg hover:bg-white transition-colors"
+                >
+                  Avmarkera
+                </button>
+              </div>
+            </div>
+          )}
+
           {deleteConfirm && (
             <div className="mx-5 my-4 bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <p className="text-sm text-red-700 font-semibold">
@@ -632,6 +743,15 @@ export default function AdminCollectionPage() {
             <table className="w-full text-left min-w-[580px]">
               <thead>
                 <tr className="bg-[#FAFAFA] border-b border-[#F0EBFF]">
+                  <th className="pl-5 pr-2 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      className="accent-[#5B3FA8] cursor-pointer"
+                      checked={allFilteredSelected}
+                      onChange={toggleAllFiltered}
+                      aria-label="Markera alla"
+                    />
+                  </th>
                   {[
                     "Bidragsgivare",
                     "Referenskod",
@@ -652,7 +772,7 @@ export default function AdminCollectionPage() {
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-5 py-12 text-center text-sm text-[#9B9BB5]"
                     >
                       Inga bidragsgivare i denna kategori.
@@ -662,8 +782,17 @@ export default function AdminCollectionPage() {
                   filtered.map((c) => (
                     <tr
                       key={c.id}
-                      className="hover:bg-[#FDFCFF] transition-colors"
+                      className={`hover:bg-[#FDFCFF] transition-colors ${selected.has(c.id) ? "bg-[#F8F6FF]" : ""}`}
                     >
+                      <td className="pl-5 pr-2 py-4">
+                        <input
+                          type="checkbox"
+                          className="accent-[#5B3FA8] cursor-pointer"
+                          checked={selected.has(c.id)}
+                          onChange={() => toggleOne(c.id)}
+                          aria-label={`Markera ${c.name}`}
+                        />
+                      </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
                           <div

@@ -126,6 +126,52 @@ app.post('/contributions', contributionRateLimit, async (c) => {
   }
 });
 
+// PATCH /api/contributions/bulk — admin sets status on many contributions in
+// one request (replaces firing N individual PATCHes). Registered before /:id.
+app.patch('/contributions/bulk', async (c) => {
+  const token = getAdminToken(c);
+  try {
+    const { collection_id, ids, status } = await c.req.json();
+    if (!collection_id || !Array.isArray(ids)) {
+      return c.json({ error: 'collection_id och ids krävs' }, 400);
+    }
+    if (!isValidStatus(status)) {
+      return c.json({ error: 'Ogiltig status' }, 400);
+    }
+    // Keep only well-formed UUIDs, cap the batch size.
+    const validIds = [...new Set(ids)]
+      .filter((x) => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x))
+      .slice(0, 1000);
+    if (!validIds.length) {
+      return c.json({ error: 'Inga giltiga poster' }, 400);
+    }
+
+    const [coll] = await sql`SELECT admin_token FROM collections WHERE id = ${collection_id}`;
+    if (!token || !coll || !tokensMatch(token, coll.admin_token)) {
+      return c.json({ error: 'Obehörig' }, 401);
+    }
+
+    const updated = await sql`
+      UPDATE contributions SET status = ${status}
+      WHERE collection_id = ${collection_id} AND id = ANY(${validIds}::uuid[])
+      RETURNING id
+    `;
+    if (updated.length > 0) {
+      await sql`UPDATE collections SET last_admin_activity_at = NOW() WHERE id = ${collection_id}`;
+      await recordAudit({
+        collectionId: collection_id,
+        action: 'contribution.bulk_update',
+        detail: { status, count: updated.length },
+        ip: getClientIp(c),
+      });
+    }
+    return c.json({ updated: updated.length });
+  } catch (error) {
+    console.error('Bulk update error:', error);
+    return c.json({ error: 'Kunde inte uppdatera bidragen' }, 500);
+  }
+});
+
 // PATCH /api/contributions/:id
 app.patch('/contributions/:id', async (c) => {
   const id = c.req.param('id');
