@@ -3,15 +3,55 @@
 Alla märkbara ändringar i detta projekt dokumenteras här.
 Formatet följer [Keep a Changelog](https://keepachangelog.com/sv/1.0.0/).
 
+**Versionsschema:** `0.x` = pre-produktion, `1.0.0` = produktionslansering.
+Vi befinner oss i **Pre-produktion 1** (0.4.0). Nästa milstolpe, efter
+BankID-verifiering, blir **Pre-produktion 2**.
+
 ---
 
 ## [Opublicerad]
 
-### Planerat
-- Super-admin panel för support
-- CSV-export av bidragslista
-- E-postnotifikationer via Resend
-- Automatisk databasrensning via cron-jobb
+### Planerat (Pre-produktion 2 — efter BankID)
+- BankID-verifiering av arrangörer via Criipto + "Verifierad"-märke
+- Utvald/kurerad upptäcktssida för verifierade insamlingar
+- Frivilliga tips till plattformen på större insamlingar
+
+---
+
+## [0.4.0] — Pre-produktion 1 — 2026-06-21
+
+### Säkerhet
+- Admin-tokens genereras med kryptografiskt säker slumpgenerator (`crypto.randomUUID`)
+- Admin-token skickas i `Authorization`-header (ej i URL) och jämförs i konstant tid
+- Hastighetsbegränsning på återhämtning, skapande och bidrag + per-nummer-utelåsning vid PIN-brute-force
+- Server-side validering av belopp och textlängder; vitlista för bidragsstatus
+- Säkerhetsheaders (CSP, `frame-ancestors 'none'`, `no-referrer`) + gräns på förfrågans storlek
+- Slutade returnera `pin_hash` till klienten; parametriserade SQL-frågor genomgående
+- Revisionslogg (`audit_log`) över alla adminåtgärder
+
+### Tillagt
+- **SMS-återhämtning** av admin-länk via 46elks — engångskod (hashad, utgångstid, försöksgräns)
+- **Per-nummer abuse-gränser för SMS** — cooldown + max per timme/dygn, IP-oberoende; ingen SMS till nummer utan insamling
+- **Sammanfattning på stängd insamling** — insamlat vs mål, måluppfyllelse, antal bidragsgivare
+- **Delningsbara länkar** — OpenGraph-kort per insamling (titel, beskrivning, framsteg, omslagsbild)
+- **Omslagsbilder** — valbar lagring: lokal volym eller S3-kompatibel (AWS S3 / Cloudflare R2 / MinIO)
+- **Massverifiering** i adminpanelen — sök (namn/referenskod/belopp), sortera, markera och verifiera flera i ett steg
+- **Uppdateringar** per insamling — arrangören publicerar nyheter som visas på den publika sidan
+
+### Databasändringar
+- Nya tabeller (skapas automatiskt vid serverstart): `audit_log`, `sms_codes`, `sms_sends`, `campaign_updates`
+- Ny kolumn: `collections.cover_image`
+
+### Ändrat
+- Bytte databasdrivrutin från `@neondatabase/serverless` till standard `postgres` (TCP)
+- Ny arkitektur: Vite SPA + Hono, driftsatt via Coolify/Nixpacks
+
+### Städat
+- Tog bort `.replit` och `replit.md` (föråldrad Replit/create.xyz-arkitektur)
+- Tog bort committad `ANYTHING_PROJECT_TOKEN` (gammal plattformstoken)
+- Tog bort kvarglömd `anything (3).zip` (10 MB)
+- Konsoliderade duplicerad `SwishLogo` och delningslogik till delade moduler
+- Tog bort trasigt `typecheck`-skript (`typescript` ej installerat)
 
 ---
 
