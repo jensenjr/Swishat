@@ -4,24 +4,39 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import collectionsRouter from './routes/collections.js';
 import contributionsRouter from './routes/contributions.js';
 import { ensureAuditSchema } from './lib/audit.js';
 import { ensureSmsSchema } from './lib/smsCodes.js';
+import { ensureSchemaMigrations } from './lib/migrations.js';
 import sql from './db.js';
 import { buildOgTags, escapeHtml } from './lib/ogMeta.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 
-// Idempotent schema bootstrap (CREATE TABLE IF NOT EXISTS). Non-fatal — if it
-// fails the app still serves; audit logging degrades to a no-op and SMS
-// recovery returns an error until the table is available.
+// Idempotent schema bootstrap (CREATE TABLE IF NOT EXISTS / ALTER ... IF NOT
+// EXISTS). Non-fatal — if it fails the app still serves; audit logging degrades
+// to a no-op and SMS recovery returns an error until the table is available.
 await ensureAuditSchema();
 await ensureSmsSchema();
+await ensureSchemaMigrations();
 
 const app = new Hono();
+
+// When serving cover images from an S3-compatible store, allow that origin in
+// the CSP so on-page <img> tags can load (local uploads are same-origin).
+let s3ImgOrigin = null;
+if (process.env.STORAGE_DRIVER === 's3' && process.env.S3_PUBLIC_BASE_URL) {
+  try {
+    s3ImgOrigin = new URL(process.env.S3_PUBLIC_BASE_URL).origin;
+  } catch {
+    /* ignore malformed URL */
+  }
+}
 
 // Security headers on every response. The CSP allows the app's own bundle plus
 // the Google Fonts it loads; inline styles are permitted because React/Tailwind
@@ -36,7 +51,7 @@ app.use(
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:'],
+      imgSrc: ["'self'", 'data:', ...(s3ImgOrigin ? [s3ImgOrigin] : [])],
       connectSrc: ["'self'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
@@ -48,16 +63,39 @@ app.use(
   }),
 );
 
-// Reject oversized request bodies before they reach the route handlers.
-app.use(
-  '/api/*',
-  bodyLimit({
-    maxSize: 64 * 1024,
-    onError: (c) => c.json({ error: 'Förfrågan är för stor' }, 413),
-  }),
-);
+// Reject oversized request bodies. JSON endpoints are capped tightly; the cover
+// upload endpoint gets a larger limit for the image payload.
+const jsonLimit = bodyLimit({
+  maxSize: 64 * 1024,
+  onError: (c) => c.json({ error: 'Förfrågan är för stor' }, 413),
+});
+const uploadLimit = bodyLimit({
+  maxSize: 4 * 1024 * 1024,
+  onError: (c) => c.json({ error: 'Bilden är för stor (max 3 MB)' }, 413),
+});
+app.use('/api/*', (c, next) => {
+  const isUpload = c.req.method === 'POST' && /\/cover$/.test(c.req.path);
+  return (isUpload ? uploadLimit : jsonLimit)(c, next);
+});
 
 app.get('/health', (c) => c.json({ status: 'ok' }));
+
+// Serve locally-stored cover images (no-op when STORAGE_DRIVER=s3, which serves
+// images from the object store directly).
+const IMG_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+app.get('/uploads/*', async (c) => {
+  const rel = decodeURIComponent(c.req.path.replace(/^\/uploads\//, ''));
+  if (rel.includes('..') || rel.startsWith('/')) return c.notFound();
+  try {
+    const buf = await readFile(join(UPLOAD_DIR, rel));
+    const ext = rel.split('.').pop().toLowerCase();
+    c.header('Content-Type', IMG_MIME[ext] || 'application/octet-stream');
+    c.header('Cache-Control', 'public, max-age=31536000, immutable');
+    return c.body(buf);
+  } catch {
+    return c.notFound();
+  }
+});
 
 app.route('/api', collectionsRouter);
 app.route('/api', contributionsRouter);
@@ -75,7 +113,8 @@ if (process.env.NODE_ENV === 'production') {
     if (match) {
       try {
         const [col] = await sql`
-          SELECT title, description, target_amount FROM collections WHERE id = ${match[1]}
+          SELECT title, description, target_amount, cover_image
+          FROM collections WHERE id = ${match[1]}
         `;
         if (col) {
           const [stats] = await sql`
@@ -87,7 +126,14 @@ if (process.env.NODE_ENV === 'production') {
           // so c.req.url would otherwise report http://).
           const proto = c.req.header('x-forwarded-proto') || 'https';
           const host = c.req.header('x-forwarded-host') || c.req.header('host');
-          const url = host ? `${proto}://${host}${c.req.path}` : c.req.url;
+          const origin = host ? `${proto}://${host}` : '';
+          const url = `${origin}${c.req.path}`;
+          // og:image must be absolute; local covers are stored as /uploads/...
+          const image = col.cover_image
+            ? col.cover_image.startsWith('/')
+              ? `${origin}${col.cover_image}`
+              : col.cover_image
+            : null;
 
           const tags = buildOgTags({
             title: col.title,
@@ -96,6 +142,7 @@ if (process.env.NODE_ENV === 'production') {
             target: col.target_amount,
             count: stats.count,
             url,
+            image,
           });
           const html = indexHtml
             .replace(

@@ -257,6 +257,14 @@ export default function CollectionPublicPage() {
       </nav>
 
       <main className="max-w-2xl mx-auto px-4 py-8 space-y-5">
+        {collection.cover_image && (
+          <img
+            src={collection.cover_image}
+            alt={collection.title}
+            className="w-full h-48 sm:h-60 object-cover rounded-2xl border border-[#E8E0FF] shadow-sm"
+          />
+        )}
+
         {/* Collection Header */}
         <div className="bg-white rounded-2xl border border-[#E8E0FF] shadow-sm p-6">
           <div className="flex items-start justify-between gap-4">
