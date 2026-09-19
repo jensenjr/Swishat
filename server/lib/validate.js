@@ -3,6 +3,8 @@
 // Throws ValidationError (HTTP 400) on bad input so route handlers can keep a
 // single catch block. Messages are in Swedish to match the rest of the app.
 
+import { isValidSwishNumber } from '../../shared/swish.js';
+
 export class ValidationError extends Error {
   constructor(message) {
     super(message);
@@ -72,4 +74,18 @@ export function optionalAmount(value, { field = 'Belopp', max = MAX_PAYMENT } = 
     throw new ValidationError(`${field} får vara högst ${max.toLocaleString('sv-SE')} kr`);
   }
   return Math.round(num * 100) / 100;
+}
+
+// Swish-nummer. Stored as the organiser typed it (recovery matches on that
+// string), but rejected up front unless it can be turned into a Swish alias —
+// otherwise the payment deep link we hand contributors is one the Swish app
+// refuses to open.
+export function requireSwishNumber(value, field = 'Swish-nummer') {
+  const text = requireText(value, field, LIMITS.swishNumber);
+  if (!isValidSwishNumber(text)) {
+    throw new ValidationError(
+      `${field} har fel format – ange ett svenskt mobilnummer (t.ex. 070 000 00 00) eller ett Swish-nummer för företag (123 000 00 00)`,
+    );
+  }
+  return text;
 }

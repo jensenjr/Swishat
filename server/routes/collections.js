@@ -13,6 +13,7 @@ import { getUpdates } from '../lib/updates.js';
 import {
   ValidationError,
   requireText,
+  requireSwishNumber,
   optionalText,
   optionalAmount,
   MAX_TARGET,
@@ -182,7 +183,7 @@ app.post('/collections', createRateLimit, async (c) => {
     const { require_proof, pin } = body;
 
     const title = requireText(body.title, 'Titel', LIMITS.title);
-    const swish_number = requireText(body.swish_number, 'Swish-nummer', LIMITS.swishNumber);
+    const swish_number = requireSwishNumber(body.swish_number);
     const description = optionalText(body.description, 'Beskrivning', LIMITS.description);
     const target_amount = optionalAmount(body.target_amount, { field: 'Målbelopp', max: MAX_TARGET });
     const suggested_amount = optionalAmount(body.suggested_amount, { field: 'Rekommenderat belopp' });
