@@ -11,6 +11,21 @@ BankID-verifiering, blir **Pre-produktion 2**.
 
 ## [Opublicerad]
 
+### Fixat
+- **Swish-djuplänken öppnas nu i appen** — Swish avvisade länken med "Felaktig
+  länk" eftersom `payee` skickades som numret skrivs i Sverige
+  (`0722150681`). Swish kräver ett Swish-alias: mobilnummer med landskod och
+  utan inledande nolla (`46722150681`) eller ett Swish Handel-nummer
+  (`123XXXXXXX`). Numret normaliseras nu innan länken byggs.
+- Bidrag utan belopp skickade `amount: 0` i djuplänken. Nyckeln utelämnas nu
+  helt så betalaren kan fylla i beloppet själv.
+
+### Tillagt
+- **Manuella betaluppgifter** på betalsteget (Swish-nummer, belopp,
+  referenskod) för den som inte kan använda djuplänken
+- **Validering av Swish-nummer** vid skapande av insamling — nummer som inte
+  kan bli ett Swish-alias avvisas med ett tydligt felmeddelande
+
 ### Planerat (Pre-produktion 2 — efter BankID)
 - BankID-verifiering av arrangörer via Criipto + "Verifierad"-märke
 - Utvald/kurerad upptäcktssida för verifierade insamlingar

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import SwishLogo from "../components/SwishLogo";
 import { shareCollection } from "../lib/share";
+import { buildSwishUrl, formatSwishNumber } from "../../shared/swish";
 
 export default function CollectionPublicPage() {
   const [id, setId] = useState("");
@@ -81,14 +82,11 @@ export default function CollectionPublicPage() {
 
   const swishUrl =
     contribution && collection
-      ? `swish://payment?data=${encodeURIComponent(
-          JSON.stringify({
-            version: 1,
-            payee: { value: collection.swish_number.replace(/\s/g, "") },
-            amount: { value: parseFloat(contribution.amount) || 0, editable: false },
-            message: { value: contribution.reference_code, editable: false },
-          }),
-        )}`
+      ? buildSwishUrl({
+          swishNumber: collection.swish_number,
+          amount: contribution.amount,
+          message: contribution.reference_code,
+        })
       : "";
 
   if (!id || isLoading)
@@ -437,34 +435,44 @@ export default function CollectionPublicPage() {
               </div>
 
               <div className="space-y-3">
-                <a
-                  href={swishUrl}
-                  onClick={() => setHasPressedPay(true)}
-                  className="w-full py-4 rounded-xl font-extrabold text-white text-base flex items-center justify-center gap-3 shadow-lg hover:opacity-90 transition-all"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, #5B3FA8 0%, #0099CC 50%, #FF8C3B 100%)",
-                  }}
-                >
-                  <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
-                    <rect
-                      width="36"
-                      height="36"
-                      rx="8"
-                      fill="white"
-                      opacity="0.2"
-                    />
-                    <path
-                      d="M9 22C9 22 12 14 18 14C21 14 22.5 16 24 16C26 16 27 14 27 14"
-                      stroke="white"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  </svg>
-                  Öppna Swish och betala
-                </a>
-                {hasPressedPay && (
+                {swishUrl ? (
+                  <a
+                    href={swishUrl}
+                    onClick={() => setHasPressedPay(true)}
+                    className="w-full py-4 rounded-xl font-extrabold text-white text-base flex items-center justify-center gap-3 shadow-lg hover:opacity-90 transition-all"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, #5B3FA8 0%, #0099CC 50%, #FF8C3B 100%)",
+                    }}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
+                      <rect
+                        width="36"
+                        height="36"
+                        rx="8"
+                        fill="white"
+                        opacity="0.2"
+                      />
+                      <path
+                        d="M9 22C9 22 12 14 18 14C21 14 22.5 16 24 16C26 16 27 14 27 14"
+                        stroke="white"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        fill="none"
+                      />
+                    </svg>
+                    Öppna Swish och betala
+                  </a>
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-left">
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                      Swish-numret i den här insamlingen har ett format som
+                      Swish-appen inte kan öppna automatiskt. Swisha manuellt
+                      med uppgifterna nedan.
+                    </p>
+                  </div>
+                )}
+                {(hasPressedPay || !swishUrl) && (
                   <button
                     onClick={() => setStep(3)}
                     className="w-full py-3 rounded-xl font-bold text-[#5B3FA8] text-sm border border-[#E8E0FF] hover:bg-[#F8F6FF] transition-colors"
@@ -473,6 +481,34 @@ export default function CollectionPublicPage() {
                   </button>
                 )}
               </div>
+
+              <details className="bg-[#F8F6FF] border border-[#E8E0FF] rounded-xl text-left">
+                <summary className="cursor-pointer select-none px-4 py-3 text-xs font-bold text-[#5B3FA8]">
+                  Fungerar inte knappen? Swisha manuellt
+                </summary>
+                <dl className="px-4 pb-4 space-y-2 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-xs text-[#9B9BB5]">Swish-nummer</dt>
+                    <dd className="font-mono font-bold text-[#1A1A2E]">
+                      {formatSwishNumber(collection.swish_number)}
+                    </dd>
+                  </div>
+                  {Number(contribution.amount) > 0 && (
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="text-xs text-[#9B9BB5]">Belopp</dt>
+                      <dd className="font-bold text-[#1A1A2E]">
+                        {Number(contribution.amount).toLocaleString("sv-SE")} kr
+                      </dd>
+                    </div>
+                  )}
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-xs text-[#9B9BB5]">Meddelande</dt>
+                    <dd className="font-mono font-bold text-[#1A1A2E]">
+                      {contribution.reference_code}
+                    </dd>
+                  </div>
+                </dl>
+              </details>
 
               <div className="bg-[#F8F6FF] rounded-lg p-3 text-xs text-[#6B6B8D] text-left leading-relaxed">
                 ℹ️ Din betalning markeras som{" "}
